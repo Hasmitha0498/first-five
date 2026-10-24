@@ -22,7 +22,7 @@ import { FeedbackPage } from "./pages/participant/Feedback";
 import { StudyWelcomePage } from "./pages/participant/StudyWelcome";
 import { LandingPage } from "./pages/public/Landing";
 import { LoginPage, SignupPage } from "./pages/public/Auth";
-import { AccessPage, CheckoutPage, PaymentStatusPage, PrivacyPage, RedeemPage, TermsPage, WaitlistPage, WaitlistSuccessPage } from "./pages/public/Funnel";
+import { AccessPage, AdminSetupPage, CheckoutPage, PaymentStatusPage, PrivacyPage, RedeemPage, TermsPage, WaitlistPage, WaitlistSuccessPage } from "./pages/public/Funnel";
 import { NotFoundPage } from "./pages/public/NotFound";
 import { PublishedReportPage } from "./pages/public/PublishedReport";
 import { SampleReportPage } from "./pages/public/SampleReport";
@@ -54,6 +54,7 @@ export function App() {
       <Route path="/checkout" element={<CheckoutPage />} />
       <Route path="/payment/status" element={<PaymentStatusPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/admin-setup" element={<AdminSetupPage />} />
       <Route path="/terms" element={<TermsPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />

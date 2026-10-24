@@ -4,6 +4,8 @@ import { z } from "zod";
 import type { AppContext } from "../context";
 import { requireUser, userId } from "../http";
 import { AppError } from "../lib/errors";
+import { audit } from "../lib/audit";
+import { safeEqualHex, sha256 } from "../lib/crypto";
 import { checkCode, redeemCode } from "../services/access-codes";
 import { createAuthSession, destroyAuthSession, login, SESSION_COOKIE, signup } from "../services/auth";
 import { getEntitlement } from "../services/entitlements";
@@ -93,6 +95,27 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
       const { code } = RedeemCodeSchema.parse(req.body);
       const result = await redeemCode(ctx, userId(req), code);
       return { redemption: result, ...(await me(userId(req))) };
+    },
+  );
+
+  /**
+   * One-time operator bootstrap: a signed-in user who knows ADMIN_BOOTSTRAP_TOKEN becomes the first admin.
+   * Disabled when the token isn't configured or any admin already exists.
+   */
+  app.post(
+    "/api/admin-bootstrap",
+    { preHandler: requireUser, config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } },
+    async (req) => {
+      const { token } = z.object({ token: z.string().min(1).max(200) }).parse(req.body);
+      const expected = ctx.config.ADMIN_BOOTSTRAP_TOKEN;
+      if (!expected) throw new AppError(404, "not_found", "Admin setup isn't enabled on this server.");
+      if ((await ctx.db.user.count({ where: { role: "admin" } })) > 0) {
+        throw new AppError(409, "already_configured", "An admin already exists. This setup link is no longer active.");
+      }
+      if (!safeEqualHex(sha256(token), sha256(expected))) throw new AppError(403, "invalid_token", "That setup token isn't correct.");
+      await ctx.db.user.update({ where: { id: userId(req) }, data: { role: "admin" } });
+      await audit(ctx.db, { actorUserId: userId(req), actorType: "user", action: "user.admin_bootstrapped", resourceType: "user", resourceId: userId(req) });
+      return me(userId(req));
     },
   );
 

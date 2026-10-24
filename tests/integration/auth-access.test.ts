@@ -129,6 +129,30 @@ describe("invitation codes and entitlements", () => {
   });
 });
 
+describe("one-time admin bootstrap", () => {
+  it("is disabled without a token, then promotes exactly one admin with the right token", async () => {
+    const plain = await signup(h.app);
+    expect((await plain.client.post("/api/admin-bootstrap", { token: "x".repeat(30) })).statusCode).toBe(404);
+
+    const h2 = await createHarness({ ADMIN_BOOTSTRAP_TOKEN: "bootstrap-token-0123456789-abcdef" });
+    try {
+      await h2.db.user.updateMany({ where: { role: "admin" }, data: { role: "user" } });
+      const a = await signup(h2.app);
+      const b = await signup(h2.app);
+      expect((await a.client.post("/api/admin-bootstrap", { token: "wrong-token-wrong-token-wrong" })).statusCode).toBe(403);
+      const ok = await a.client.post("/api/admin-bootstrap", { token: "bootstrap-token-0123456789-abcdef" });
+      expect(ok.statusCode).toBe(200);
+      expect(json(ok).user.role).toBe("admin");
+      // Once an admin exists, the token stops working for everyone.
+      const again = await b.client.post("/api/admin-bootstrap", { token: "bootstrap-token-0123456789-abcdef" });
+      expect(again.statusCode).toBe(409);
+      expect((await a.client.get("/api/admin/codes")).statusCode).toBe(200);
+    } finally {
+      await h2.close();
+    }
+  });
+});
+
 describe("waitlist (lead generation only)", () => {
   it("stores a lead, deduplicates by normalized email, and never creates an account or access", async () => {
     const c = new Client(h.app);
