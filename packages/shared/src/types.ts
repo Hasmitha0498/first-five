@@ -247,6 +247,10 @@ export interface TimelineEvent {
   elementKey: string | null;
   elementType: string | null;
   label: string | null;
+  /** Name sent with ff_custom_event (e.g. "cta_hesitate"); null for other events. */
+  customName: string | null;
+  /** Display-safe details for custom events (see DISPLAY_DETAIL_KEYS). */
+  details: Record<string, string | number | boolean> | null;
   isGoal: boolean;
   isBacktrack: boolean;
   isRepeat: boolean;

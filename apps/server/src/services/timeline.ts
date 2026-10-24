@@ -2,7 +2,7 @@
  * Deterministic per-attempt behavior analysis from the stored, sanitized event
  * history. Describes what was observed; never infers causes.
  */
-import type { TimelineEvent } from "@firstfive/shared";
+import { pickDisplayDetails, type TimelineEvent } from "@firstfive/shared";
 import { pathsEqual } from "../lib/url";
 
 export interface StoredEvent {
@@ -27,7 +27,20 @@ export interface TimelineAnalysis {
   backtracks: number;
   repeatedInteractions: number;
   clientErrors: number;
-  lastEvent: { name: string; pagePath: string | null; label: string | null; at: string } | null;
+  lastEvent: {
+    name: string;
+    pagePath: string | null;
+    label: string | null;
+    customName: string | null;
+    details: Record<string, string | number | boolean> | null;
+    at: string;
+  } | null;
+}
+
+function customNameOf(e: Pick<StoredEvent, "eventName" | "properties">): string | null {
+  if (e.eventName !== "ff_custom_event") return null;
+  const n = (e.properties as Record<string, unknown> | null | undefined)?.custom_event_name;
+  return typeof n === "string" ? n : null;
 }
 
 /** Stable order: client sequence, then client timestamp, then receipt time. */
@@ -90,6 +103,8 @@ export function analyzeTimeline(events: StoredEvent[], opts: { startedAt: Date; 
       elementKey: e.elementKey,
       elementType: e.elementType,
       label: e.elementLabel,
+      customName: customNameOf(e),
+      details: e.eventName === "ff_custom_event" ? pickDisplayDetails(e.properties) : null,
       isGoal: opts.verifiedGoalEventId != null && e.eventId === opts.verifiedGoalEventId,
       isBacktrack,
       isRepeat,
@@ -106,7 +121,14 @@ export function analyzeTimeline(events: StoredEvent[], opts: { startedAt: Date; 
     repeatedInteractions,
     clientErrors,
     lastEvent: last
-      ? { name: last.eventName, pagePath: last.pagePath, label: last.elementLabel, at: last.clientTimestamp.toISOString() }
+      ? {
+          name: last.eventName,
+          pagePath: last.pagePath,
+          label: last.elementLabel,
+          customName: customNameOf(last),
+          details: last.eventName === "ff_custom_event" ? pickDisplayDetails(last.properties) : null,
+          at: last.clientTimestamp.toISOString(),
+        }
       : null,
   };
 }

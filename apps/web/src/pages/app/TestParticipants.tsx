@@ -1,4 +1,4 @@
-import { FINAL_REASON_LABELS, type SessionListItem, type SessionStatus } from "@firstfive/shared";
+import { FINAL_REASON_LABELS, type SessionListItem, type SessionStatus, describeCustomEvent, type EventDetails } from "@firstfive/shared";
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { Users } from "lucide-react";
@@ -108,7 +108,13 @@ export function TestParticipantsPage() {
   );
 }
 
-export function describeEvent(e: { name: string; pagePath: string | null; label: string | null }) {
+export function describeEvent(e: {
+  name: string;
+  pagePath: string | null;
+  label: string | null;
+  customName?: string | null;
+  details?: EventDetails | null;
+}) {
   switch (e.name) {
     case "ff_page_viewed":
       return `Viewed ${e.pagePath}`;
@@ -117,7 +123,7 @@ export function describeEvent(e: { name: string; pagePath: string | null; label:
     case "ff_form_submitted":
       return `Submitted a form${e.pagePath ? ` on ${e.pagePath}` : ""}`;
     case "ff_custom_event":
-      return "Custom event";
+      return describeCustomEvent(e.customName, e.details);
     case "ff_client_error":
       return `Page error${e.pagePath ? ` on ${e.pagePath}` : ""}`;
     case "ff_goal_reached":
