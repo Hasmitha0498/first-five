@@ -186,7 +186,22 @@ export interface SessionStateResponse {
 }
 
 export const END_REASONS = ["finished", "gave_up", "consent_withdrawn"] as const;
-export const EndRequestSchema = z.object({ reason: z.enum(END_REASONS) }).strict();
+export const EndRequestSchema = z
+  .object({
+    reason: z.enum(END_REASONS),
+    /** C3: highest client_sequence the SDK assigned; the server waits briefly for late events. */
+    last_client_sequence: z.number().int().min(0).max(1_000_000).optional(),
+  })
+  .strict();
+
+/** How long /session/end waits for events up to last_client_sequence to arrive (C3). */
+export const END_FLUSH_GRACE_MS = 10_000;
+
+export interface SetupFinishResponse {
+  status: "finished";
+  /** First Five page showing this website's discovery results. */
+  return_url: string;
+}
 export type EndRequest = z.infer<typeof EndRequestSchema>;
 
 export interface EndResponse {

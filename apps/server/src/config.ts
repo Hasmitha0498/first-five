@@ -95,6 +95,8 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error(`Invalid environment configuration:\n${issues}`);
   }
   const env = parsed.data;
+  // the Render env group names the PostHog project token POSTHOG_PROJECT_TOKEN
+  if (!env.POSTHOG_PROJECT_API_KEY && source.POSTHOG_PROJECT_TOKEN) env.POSTHOG_PROJECT_API_KEY = source.POSTHOG_PROJECT_TOKEN;
   const appUrl = (env.APP_URL ?? env.RENDER_EXTERNAL_URL ?? `http://localhost:${env.PORT}`).replace(/\/+$/, "");
   const appOrigin = new URL(appUrl).origin;
   const isProduction = env.NODE_ENV === "production";
