@@ -1,0 +1,826 @@
+// First Five — operational database (Render PostgreSQL).
+// PostgreSQL is the authoritative store for accounts, studies, task-session
+// outcomes, feedback, reports, approvals, entitlements and payments.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────── Accounts ─────────────────────────────
+
+enum UserRole {
+  user
+  admin
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  name         String?
+  passwordHash String
+  role         UserRole @default(user)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  authSessions  AuthSession[]
+  projects      Project[]
+  accessGrants  AccessGrant[]
+  redemptions   InvitationCodeRedemption[]
+  createdCodes  InvitationCode[]           @relation("CodeCreator")
+  orders        Order[]
+  approvals     ReportApproval[]
+  setupSessions SetupSession[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model AuthSession {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  tokenHash  String   @unique
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  expiresAt  DateTime
+  userAgent  String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("auth_sessions")
+}
+
+// ───────────────────────── Access & entitlements ─────────────────────────
+
+enum GrantSource {
+  invitation_code
+  payment
+  admin
+}
+
+// A study entitlement. One credit is consumed atomically when a study is first launched.
+model AccessGrant {
+  id                      String      @id @default(uuid()) @db.Uuid
+  userId                  String      @db.Uuid
+  planKey                 String
+  source                  GrantSource
+  studyCredits            Int
+  creditsUsed             Int         @default(0)
+  maxParticipantsPerStudy Int
+  startsAt                DateTime    @default(now())
+  expiresAt               DateTime?
+  revokedAt               DateTime?
+  orderId                 String?     @unique @db.Uuid
+  redemptionId            String?     @unique @db.Uuid
+  createdAt               DateTime    @default(now())
+
+  user       User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order      Order?                    @relation(fields: [orderId], references: [id])
+  redemption InvitationCodeRedemption? @relation(fields: [redemptionId], references: [id])
+  studies    Study[]
+
+  @@index([userId])
+  @@map("access_grants")
+}
+
+model InvitationCode {
+  id              String    @id @default(uuid()) @db.Uuid
+  // HMAC-SHA256(code) — the plaintext code is shown once at generation time.
+  codeHash        String    @unique
+  // Last 4 characters only, for admin identification.
+  codeHint        String
+  label           String
+  audience        String    @default("judge")
+  planKey         String
+  // Allowance granted per redemption.
+  studyCredits    Int       @default(1)
+  participantCap  Int       @default(5)
+  maxRedemptions  Int
+  redemptionCount Int       @default(0)
+  grantDays       Int?
+  expiresAt       DateTime?
+  disabledAt      DateTime?
+  createdById     String?   @db.Uuid
+  createdAt       DateTime  @default(now())
+
+  createdBy   User?                      @relation("CodeCreator", fields: [createdById], references: [id])
+  redemptions InvitationCodeRedemption[]
+
+  @@map("invitation_codes")
+}
+
+model InvitationCodeRedemption {
+  id         String   @id @default(uuid()) @db.Uuid
+  codeId     String   @db.Uuid
+  userId     String   @db.Uuid
+  redeemedAt DateTime @default(now())
+
+  code  InvitationCode @relation(fields: [codeId], references: [id])
+  user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  grant AccessGrant?
+
+  @@unique([codeId, userId])
+  @@map("invitation_code_redemptions")
+}
+
+// Lead-generation only: never creates an account or any product access.
+model WaitlistLead {
+  id                 String   @id @default(uuid()) @db.Uuid
+  name               String
+  email              String   @unique
+  productDescription String?
+  productUrl         String?
+  source             String?
+  utmSource          String?
+  utmMedium          String?
+  utmCampaign        String?
+  utmTerm            String?
+  utmContent         String?
+  referrer           String?
+  noticeVersion      String
+  submissionCount    Int      @default(1)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([createdAt])
+  @@map("waitlist_leads")
+}
+
+// Privacy-conscious funnel events. visitorId is a random first-party ID, never an email.
+model ConversionEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  visitorId   String?
+  userId      String?  @db.Uuid
+  // "production" | "development" | "test"; payment events also carry their own uat/live flag.
+  environment String
+  properties  Json?
+  createdAt   DateTime @default(now())
+
+  @@index([name, createdAt])
+  @@index([visitorId])
+  @@map("conversion_events")
+}
+
+// ─────────────────────────── Projects & SDK ───────────────────────────
+
+enum IntegrationStatus {
+  setup_not_started
+  awaiting_connection
+  verification_needed
+  connected
+  connection_issue
+}
+
+model Project {
+  id                String            @id @default(uuid()) @db.Uuid
+  ownerId           String            @db.Uuid
+  publicId          String            @unique
+  name              String
+  description       String?
+  websiteUrl        String
+  canonicalOrigin   String
+  integrationStatus IntegrationStatus @default(setup_not_started)
+  lastSdkVersion    String?
+  lastConfigPingAt  DateTime?
+  lastActivityAt    DateTime?
+  firstConnectedAt  DateTime?
+  lastIssue         String?
+  lastIssueAt       DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  owner              User                    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  origins            ProjectOrigin[]
+  sdkConfig          ProjectSdkConfig?
+  discoveredPages    DiscoveredPage[]
+  discoveredElements DiscoveredElement[]
+  discoveredEvents   DiscoveredCustomEvent[]
+  studies            Study[]
+  setupSessions      SetupSession[]
+  sdkTickets         SdkTicket[]
+  sdkCredentials     SdkCredential[]
+  events             EventRecord[]
+
+  @@index([ownerId])
+  @@map("projects")
+}
+
+model ProjectOrigin {
+  id         String    @id @default(uuid()) @db.Uuid
+  projectId  String    @db.Uuid
+  origin     String
+  verifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, origin])
+  @@map("project_origins")
+}
+
+model ProjectSdkConfig {
+  id                  String   @id @default(uuid()) @db.Uuid
+  projectId           String   @unique @db.Uuid
+  setupEnabled        Boolean  @default(true)
+  maxBatchEvents      Int      @default(50)
+  allowedCustomEvents String[] @default([])
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("project_sdk_configs")
+}
+
+enum SetupSessionStatus {
+  active
+  finished
+  expired
+}
+
+model SetupSession {
+  id          String             @id @default(uuid()) @db.Uuid
+  projectId   String             @db.Uuid
+  createdById String             @db.Uuid
+  status      SetupSessionStatus @default(active)
+  startedAt   DateTime           @default(now())
+  expiresAt   DateTime
+  endedAt     DateTime?
+  eventCount  Int                @default(0)
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User    @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("setup_sessions")
+}
+
+enum SdkTicketKind {
+  setup_launch
+  live_launch
+  feedback
+}
+
+// One-time, short-lived handoff tickets (cross-domain launch + feedback return).
+model SdkTicket {
+  id             String        @id @default(uuid()) @db.Uuid
+  kind           SdkTicketKind
+  tokenHash      String        @unique
+  projectId      String        @db.Uuid
+  setupSessionId String?       @db.Uuid
+  studySessionId String?       @db.Uuid
+  allowedOrigin  String?
+  expiresAt      DateTime
+  consumedAt     DateTime?
+  createdAt      DateTime      @default(now())
+
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  studySession StudySession? @relation(fields: [studySessionId], references: [id], onDelete: Cascade)
+
+  @@index([studySessionId])
+  @@map("sdk_tickets")
+}
+
+enum SdkMode {
+  setup
+  live
+}
+
+// Scoped credential obtained by exchanging a ticket. Bearer token, stored hashed.
+model SdkCredential {
+  id             String    @id @default(uuid()) @db.Uuid
+  tokenHash      String    @unique
+  mode           SdkMode
+  projectId      String    @db.Uuid
+  setupSessionId String?   @db.Uuid
+  studySessionId String?   @db.Uuid
+  origin         String
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  studySession StudySession? @relation(fields: [studySessionId], references: [id], onDelete: Cascade)
+
+  @@index([studySessionId])
+  @@map("sdk_credentials")
+}
+
+model DiscoveredPage {
+  id                 String   @id @default(uuid()) @db.Uuid
+  projectId          String   @db.Uuid
+  path               String
+  viewCount          Int      @default(0)
+  firstSeenAt        DateTime @default(now())
+  lastSeenAt         DateTime @default(now())
+  lastSetupSessionId String?  @db.Uuid
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, path])
+  @@map("discovered_pages")
+}
+
+model DiscoveredElement {
+  id                 String   @id @default(uuid()) @db.Uuid
+  projectId          String   @db.Uuid
+  pagePath           String
+  elementKey         String
+  elementType        String
+  safeLabel          String?
+  // Available (seen in DOM scan) and clicked are separate facts.
+  wasClicked         Boolean  @default(false)
+  firstSeenAt        DateTime @default(now())
+  lastSeenAt         DateTime @default(now())
+  lastSetupSessionId String?  @db.Uuid
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, pagePath, elementKey])
+  @@index([projectId, elementKey])
+  @@map("discovered_elements")
+}
+
+model DiscoveredCustomEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  projectId   String   @db.Uuid
+  eventName   String
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, eventName])
+  @@map("discovered_custom_events")
+}
+
+// ─────────────────────────────── Studies ───────────────────────────────
+
+enum StudyStatus {
+  draft
+  ready
+  active
+  paused
+  full
+  closed
+  expired
+}
+
+enum GoalType {
+  element_clicked
+  page_reached
+  custom_event
+}
+
+model Study {
+  id               String      @id @default(uuid()) @db.Uuid
+  projectId        String      @db.Uuid
+  publicId         String      @unique
+  name             String
+  status           StudyStatus @default(draft)
+  participantLimit Int         @default(5)
+  // The entitlement whose credit this study consumed at first launch.
+  creditGrantId    String?     @db.Uuid
+  currentVersion   Int         @default(1)
+  expiresAt        DateTime?
+  launchedAt       DateTime?
+  closedAt         DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  project     Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creditGrant AccessGrant?        @relation(fields: [creditGrantId], references: [id])
+  versions    StudyVersion[]
+  invites     ParticipantInvite[]
+  sessions    StudySession[]
+  reports     Report[]
+  agentRuns   AgentRun[]
+
+  @@index([projectId])
+  @@map("studies")
+}
+
+// Immutable once published (first participant session). Changes create a new version.
+model StudyVersion {
+  id               String    @id @default(uuid()) @db.Uuid
+  studyId          String    @db.Uuid
+  version          Int
+  task             String
+  startPath        String
+  startVerified    Boolean   @default(false)
+  goalType         GoalType
+  goalTarget       String
+  goalPagePath     String?
+  goalVerified     Boolean   @default(false)
+  timeLimitSeconds Int       @default(300)
+  milestones       Json      @default("[]")
+  repeatPolicy     String    @default("flag_repeats")
+  publishedAt      DateTime?
+  createdAt        DateTime  @default(now())
+
+  study    Study          @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  sessions StudySession[]
+
+  @@unique([studyId, version])
+  @@map("study_versions")
+}
+
+model ParticipantInvite {
+  id                  String   @id @default(uuid()) @db.Uuid
+  studyId             String   @db.Uuid
+  // Pseudonymous, study-scoped. Never an email.
+  participantKey      String   @unique
+  label               String
+  tokenHash           String   @unique
+  maxEligibleAttempts Int      @default(1)
+  createdAt           DateTime @default(now())
+
+  study    Study          @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  sessions StudySession[]
+
+  @@index([studyId])
+  @@map("participant_invites")
+}
+
+enum SessionStatus {
+  pending
+  completed
+  dropped
+  invalid
+}
+
+enum FeedbackStatus {
+  not_prompted
+  awaiting
+  submitted
+  skipped
+  unavailable
+}
+
+model StudySession {
+  id                  String         @id @default(uuid()) @db.Uuid
+  publicId            String         @unique
+  studyId             String         @db.Uuid
+  studyVersionId      String         @db.Uuid
+  inviteId            String         @db.Uuid
+  status              SessionStatus  @default(pending)
+  isRepeat            Boolean        @default(false)
+  consentAt           DateTime
+  consentTextVersion  String
+  startedAt           DateTime
+  deadlineAt          DateTime
+  launchExchangedAt   DateTime?
+  lastEventAt         DateTime?
+  goalVerifiedAt      DateTime?
+  verifiedGoalEventId String?
+  finalizedAt         DateTime?
+  finalReason         String?
+  dataQualityFlags    String[]       @default([])
+  feedbackStatus      FeedbackStatus @default(not_prompted)
+  createdAt           DateTime       @default(now())
+
+  study        Study                  @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  studyVersion StudyVersion           @relation(fields: [studyVersionId], references: [id])
+  invite       ParticipantInvite      @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  tickets      SdkTicket[]
+  credentials  SdkCredential[]
+  receipts     CriticalEventReceipt[]
+  events       EventRecord[]
+  questions    InterviewQuestion[]
+  responses    InterviewResponse[]
+
+  @@index([studyId, status])
+  @@index([studyId, startedAt])
+  @@index([status, deadlineAt])
+  @@map("study_sessions")
+}
+
+model CriticalEventReceipt {
+  id             String   @id @default(uuid()) @db.Uuid
+  studySessionId String   @db.Uuid
+  kind           String
+  eventId        String?
+  occurredAt     DateTime
+  receivedAt     DateTime @default(now())
+  verified       Boolean  @default(false)
+  detail         Json?
+
+  studySession StudySession @relation(fields: [studySessionId], references: [id], onDelete: Cascade)
+
+  @@unique([studySessionId, kind])
+  @@map("critical_event_receipts")
+}
+
+// Short-lived, sanitized event history (purged after EVENT_RETENTION_DAYS).
+model EventRecord {
+  id              String   @id @default(uuid()) @db.Uuid
+  eventId         String   @unique
+  projectId       String   @db.Uuid
+  mode            SdkMode
+  setupSessionId  String?  @db.Uuid
+  studySessionId  String?  @db.Uuid
+  eventName       String
+  clientSequence  Int?
+  clientTimestamp DateTime
+  receivedAt      DateTime @default(now())
+  pagePath        String?
+  elementKey      String?
+  elementType     String?
+  elementLabel    String?
+  properties      Json?
+  purgeAfter      DateTime
+
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  studySession StudySession? @relation(fields: [studySessionId], references: [id], onDelete: Cascade)
+
+  @@index([studySessionId, clientSequence])
+  @@index([projectId, mode, receivedAt])
+  @@index([purgeAfter])
+  @@map("event_records")
+}
+
+// ───────────────────────────── Interviews ─────────────────────────────
+
+model InterviewQuestion {
+  id             String   @id @default(uuid()) @db.Uuid
+  studySessionId String   @db.Uuid
+  questionKey    String
+  position       Int
+  kind           String
+  // The exact text that was displayed to the participant.
+  text           String
+  // "standard" | "fallback" | "agenticorg"
+  source         String
+  agentRunId     String?  @db.Uuid
+  displayedAt    DateTime @default(now())
+
+  studySession StudySession        @relation(fields: [studySessionId], references: [id], onDelete: Cascade)
+  responses    InterviewResponse[]
+
+  @@unique([studySessionId, questionKey])
+  @@map("interview_questions")
+}
+
+model InterviewResponse {
+  id             String   @id @default(uuid()) @db.Uuid
+  studySessionId String   @db.Uuid
+  questionId     String   @db.Uuid
+  // "answered" | "skipped"
+  status         String
+  choice         String?
+  text           String?
+  submittedAt    DateTime @default(now())
+
+  studySession StudySession      @relation(fields: [studySessionId], references: [id], onDelete: Cascade)
+  question     InterviewQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId])
+  @@index([studySessionId])
+  @@map("interview_responses")
+}
+
+// ───────────────────────────── Reports ─────────────────────────────
+
+enum ReportStatus {
+  not_generated
+  processing
+  draft
+  awaiting_review
+  revision_requested
+  approved
+  rejected
+  published
+  failed
+}
+
+model Report {
+  id              String       @id @default(uuid()) @db.Uuid
+  studyId         String       @db.Uuid
+  studyVersion    Int
+  // "owner" (written by the builder) | "agenticorg" (UX Director run)
+  source          String
+  status          ReportStatus @default(draft)
+  revision        Int          @default(1)
+  title           String
+  summary         String?
+  metricsSnapshot Json
+  snapshotAt      DateTime
+  agentRunId      String?      @db.Uuid
+  shareToken      String?      @unique
+  publishedAt     DateTime?
+  failureReason   String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  study     Study            @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  findings  ReportFinding[]
+  approvals ReportApproval[]
+  agentRun  AgentRun?        @relation(fields: [agentRunId], references: [id])
+
+  @@index([studyId])
+  @@map("reports")
+}
+
+model ReportFinding {
+  id                   String   @id @default(uuid()) @db.Uuid
+  reportId             String   @db.Uuid
+  position             Int      @default(0)
+  title                String
+  observed             String
+  // Exact participant quotations: [{ sessionId, responseId, text }]
+  quotes               Json     @default("[]")
+  interpretation       String?
+  evidenceStrength     String   @default("inconclusive")
+  suggestion           String?
+  retestMetric         String?
+  supportingSessionIds String[] @default([])
+  counterSessionIds    String[] @default([])
+  source               String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@map("report_findings")
+}
+
+model ReportApproval {
+  id                 String   @id @default(uuid()) @db.Uuid
+  reportId           String   @db.Uuid
+  reportRevision     Int
+  // "first_five" (local, owner-authorized) | "agenticorg" (external HITL)
+  channel            String
+  externalApprovalId String?  @unique
+  reviewerId         String?  @db.Uuid
+  // "requested" | "approved" | "rejected" | "revision_requested"
+  decision           String
+  note               String?
+  createdAt          DateTime @default(now())
+
+  report   Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  reviewer User?  @relation(fields: [reviewerId], references: [id])
+
+  @@index([reportId, decision])
+  @@map("report_approvals")
+}
+
+model AgentRun {
+  id             String    @id @default(uuid()) @db.Uuid
+  provider       String
+  kind           String
+  studyId        String?   @db.Uuid
+  studySessionId String?   @db.Uuid
+  externalRunId  String?   @unique
+  status         String
+  inputDigest    String?
+  error          String?
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+
+  study   Study?   @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  reports Report[]
+
+  @@map("agent_runs")
+}
+
+// ───────────────────────────── Payments ─────────────────────────────
+
+enum OrderStatus {
+  created
+  checkout_ready
+  pending_verification
+  paid_verified
+  failed
+  cancelled
+  refunded
+  verification_error
+}
+
+enum PaymentEnvironment {
+  uat
+  live
+}
+
+model Order {
+  id                String             @id @default(uuid()) @db.Uuid
+  userId            String             @db.Uuid
+  planKey           String
+  provider          String             @default("pinelabs")
+  amountMinor       Int
+  currency          String
+  environment       PaymentEnvironment
+  merchantReference String             @unique
+  providerOrderId   String?            @unique
+  status            OrderStatus        @default(created)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments Payment[]
+  grant    AccessGrant?
+
+  @@index([userId])
+  @@map("orders")
+}
+
+model Payment {
+  id                String    @id @default(uuid()) @db.Uuid
+  orderId           String    @db.Uuid
+  providerPaymentId String?   @unique
+  providerEventId   String?
+  providerStatus    String
+  verified          Boolean   @default(false)
+  verifiedAt        DateTime?
+  updatedAt         DateTime  @updatedAt
+  createdAt         DateTime  @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+model PaymentWebhookEvent {
+  id              String    @id @default(uuid()) @db.Uuid
+  provider        String
+  externalEventId String
+  signatureValid  Boolean
+  payloadDigest   String
+  processedAt     DateTime?
+  receivedAt      DateTime  @default(now())
+
+  @@unique([provider, externalEventId])
+  @@map("payment_webhook_events")
+}
+
+// ───────────────────────── Integrations & ops ─────────────────────────
+
+enum ProviderStatus {
+  not_configured
+  configured
+  verification_pending
+  verified
+  error
+}
+
+model ProviderConnection {
+  provider      String         @id
+  status        ProviderStatus @default(not_configured)
+  lastCheckedAt DateTime?
+  lastSuccessAt DateTime?
+  lastError     String?
+  details       Json?
+  updatedAt     DateTime       @updatedAt
+
+  @@map("provider_connections")
+}
+
+enum OutboxStatus {
+  pending
+  delivered
+  failed
+  dead
+}
+
+model OutboxMessage {
+  id            String       @id @default(uuid()) @db.Uuid
+  provider      String
+  dedupeKey     String
+  payload       Json
+  status        OutboxStatus @default(pending)
+  attempts      Int          @default(0)
+  nextAttemptAt DateTime     @default(now())
+  lastError     String?
+  createdAt     DateTime     @default(now())
+  deliveredAt   DateTime?
+  purgeAfter    DateTime
+
+  @@unique([provider, dedupeKey])
+  @@index([provider, status, nextAttemptAt])
+  @@index([purgeAfter])
+  @@map("outbox_messages")
+}
+
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  actorUserId  String?  @db.Uuid
+  actorType    String
+  action       String
+  resourceType String
+  resourceId   String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([resourceType, resourceId])
+  @@index([actorUserId])
+  @@map("audit_logs")
+}

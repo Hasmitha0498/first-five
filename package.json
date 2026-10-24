@@ -1,0 +1,69 @@
+{
+  "name": "first-five",
+  "version": "0.1.0",
+  "private": true,
+  "description": "First Five — task-based usability research platform (Render web app + API).",
+  "type": "module",
+  "engines": {
+    "node": ">=20.18"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:db": "tsx scripts/dev-db.ts",
+    "dev:server": "npm run dev -w @firstfive/server",
+    "dev:web": "npm run dev -w @firstfive/web",
+    "build": "prisma generate && npm run build -w @firstfive/web && npm run build -w @firstfive/server",
+    "start": "prisma migrate deploy && node apps/server/dist/index.js",
+    "start:no-migrate": "node apps/server/dist/index.js",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:generate": "prisma generate",
+    "typecheck": "tsc -p packages/shared && tsc -p packages/sdk-contract && tsc -p apps/server && tsc -p apps/web",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:e2e": "playwright test",
+    "admin:codes": "node apps/server/dist/cli/generate-codes.js",
+    "admin:grant-admin": "node apps/server/dist/cli/grant-admin.js",
+    "admin:sweep": "node apps/server/dist/cli/sweep.js",
+    "admin:codes:dev": "tsx apps/server/src/cli/generate-codes.ts",
+    "admin:grant-admin:dev": "tsx apps/server/src/cli/grant-admin.ts"
+  },
+  "prisma": {
+    "schema": "prisma/schema.prisma"
+  },
+  "dependencies": {
+    "zod": "^3.24.1",
+    "prisma": "^6.16.0",
+    "@prisma/client": "^6.16.0",
+    "fastify": "^5.2.0",
+    "@fastify/cookie": "^11.0.1",
+    "@fastify/rate-limit": "^10.2.1",
+    "@fastify/static": "^8.0.3",
+    "@fastify/helmet": "^13.0.1",
+    "@fastify/cors": "^10.0.1",
+    "argon2": "^0.41.1"
+  },
+  "devDependencies": {
+    "typescript": "~5.7.2",
+    "tsx": "^4.19.2",
+    "tsup": "^8.3.5",
+    "vitest": "^3.0.0",
+    "@types/node": "^22.10.0",
+    "embedded-postgres": "^17.2.0-beta.15",
+    "@playwright/test": "^1.49.1"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "argon2@0.41.1": true,
+    "prisma@6.19.3": true,
+    "@embedded-postgres/darwin-arm64@17.2.0-beta.15": true,
+    "@prisma/engines@6.19.3": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.27.7": true,
+    "esbuild@0.28.2": true
+  }
+}

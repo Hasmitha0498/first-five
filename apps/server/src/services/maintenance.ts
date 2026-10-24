@@ -1,0 +1,62 @@
+import type { AppContext } from "../context";
+import type { PostHogCaptureEvent } from "../integrations/posthog";
+import { reconcileExpired } from "./sessions";
+
+const MAX_ATTEMPTS = 8;
+
+/** Delivers pending analytics events to PostHog with bounded exponential backoff. */
+export async function dispatchOutbox(ctx: AppContext, limit = 200) {
+  if (!ctx.providers.analytics.configured) return { delivered: 0, failed: 0, skipped: true };
+  const due = await ctx.db.outboxMessage.findMany({
+    where: { provider: "posthog", status: { in: ["pending", "failed"] }, nextAttemptAt: { lte: new Date() } },
+    orderBy: { createdAt: "asc" },
+    take: limit,
+  });
+  if (due.length === 0) return { delivered: 0, failed: 0, skipped: false };
+  try {
+    await ctx.providers.analytics.captureBatch(due.map((m) => m.payload as unknown as PostHogCaptureEvent));
+    await ctx.db.outboxMessage.updateMany({
+      where: { id: { in: due.map((m) => m.id) } },
+      data: { status: "delivered", deliveredAt: new Date(), attempts: { increment: 1 }, lastError: null },
+    });
+    return { delivered: due.length, failed: 0, skipped: false };
+  } catch (err) {
+    const message = (err as Error).message.slice(0, 300);
+    for (const m of due) {
+      const attempts = m.attempts + 1;
+      await ctx.db.outboxMessage.update({
+        where: { id: m.id },
+        data: {
+          attempts,
+          status: attempts >= MAX_ATTEMPTS ? "dead" : "failed",
+          lastError: message,
+          nextAttemptAt: new Date(Date.now() + Math.min(2 ** attempts * 30_000, 6 * 3600_000)),
+        },
+      });
+    }
+    ctx.log.warn({ err: message, count: due.length }, "analytics outbox delivery failed");
+    return { delivered: 0, failed: due.length, skipped: false };
+  }
+}
+
+/** Retention and housekeeping. */
+export async function purgeExpired(ctx: AppContext) {
+  const now = new Date();
+  const dayAgo = new Date(now.getTime() - 86_400_000);
+  const [events, outbox, authSessions, tickets, credentials, setups] = await Promise.all([
+    ctx.db.eventRecord.deleteMany({ where: { purgeAfter: { lt: now } } }),
+    ctx.db.outboxMessage.deleteMany({ where: { purgeAfter: { lt: now } } }),
+    ctx.db.authSession.deleteMany({ where: { expiresAt: { lt: now } } }),
+    ctx.db.sdkTicket.deleteMany({ where: { expiresAt: { lt: dayAgo } } }),
+    ctx.db.sdkCredential.deleteMany({ where: { expiresAt: { lt: dayAgo } } }),
+    ctx.db.setupSession.updateMany({ where: { status: "active", expiresAt: { lt: now } }, data: { status: "expired", endedAt: now } }),
+  ]);
+  return { events: events.count, outbox: outbox.count, authSessions: authSessions.count, tickets: tickets.count, credentials: credentials.count, setups: setups.count };
+}
+
+export async function runMaintenance(ctx: AppContext) {
+  const sessions = await reconcileExpired(ctx);
+  const outbox = await dispatchOutbox(ctx);
+  const purged = await purgeExpired(ctx);
+  return { sessions, outbox, purged };
+}

@@ -1,0 +1,9 @@
+{
+  "name": "@firstfive/sdk-contract",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Types, schemas and endpoint contract shared with the separately developed First Five SDK. Contains NO SDK implementation.",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}

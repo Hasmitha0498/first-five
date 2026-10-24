@@ -1,0 +1,204 @@
+openapi: 3.1.0
+info:
+  title: First Five SDK API
+  version: "1.0.0"
+  description: |
+    Endpoints used by the separately developed First Five browser SDK.
+    Narrative contract: docs/integrations/SDK_INTEGRATION.md.
+    Types/schemas: packages/sdk-contract/src/index.ts.
+servers:
+  - url: https://first-five.onrender.com
+components:
+  securitySchemes:
+    sdkCredential:
+      type: http
+      scheme: bearer
+      description: Scoped setup/live credential returned by POST /api/sdk/exchange. Never place it in URLs.
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+    SdkEvent:
+      type: object
+      additionalProperties: false
+      required: [schema_version, event_id, event_name, project_id, mode, client_sequence, timestamp]
+      properties:
+        schema_version: { const: 1 }
+        event_id: { type: string, format: uuid }
+        event_name:
+          type: string
+          enum: [ff_page_viewed, ff_element_clicked, ff_form_submitted, ff_custom_event, ff_activity, ff_client_error, ff_element_discovered, ff_goal_reached]
+        project_id: { type: string, pattern: "^ffp_[a-z0-9]{8,40}$" }
+        study_id: { type: string, pattern: "^ffs_[a-z0-9]{8,40}$", description: "Live mode only" }
+        session_id: { type: string, pattern: "^ffx_[a-z0-9]{8,40}$", description: "Live mode only" }
+        mode: { type: string, enum: [setup, live] }
+        client_sequence: { type: integer, minimum: 0, maximum: 1000000 }
+        timestamp: { type: string, format: date-time }
+        page_path: { type: string, pattern: "^/", maxLength: 512 }
+        element_id: { type: string, maxLength: 120 }
+        element_type: { type: string, enum: [button, link, submit, role_button, form, custom, other] }
+        element_label: { type: string, maxLength: 200 }
+        custom_event_name: { type: string, pattern: "^[a-z][a-z0-9_]{0,63}$" }
+        properties:
+          type: object
+          maxProperties: 10
+          additionalProperties:
+            oneOf:
+              - { type: string, maxLength: 120 }
+              - { type: number }
+              - { type: boolean }
+    StudyInfo:
+      type: object
+      properties:
+        study_id: { type: string }
+        session_id: { type: string }
+        task: { type: string }
+        deadline_at: { type: string, format: date-time }
+        goal_type: { type: string, enum: [element_clicked, page_reached, custom_event] }
+paths:
+  /api/sdk/config:
+    get:
+      summary: Public project configuration (records an installation ping from allowed origins)
+      parameters:
+        - { in: query, name: project_id, required: true, schema: { type: string } }
+        - { in: query, name: sdk_version, required: false, schema: { type: string } }
+      responses:
+        "200": { description: Configuration }
+        "403": { description: origin_not_allowed, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { description: not_found }
+  /api/sdk/exchange:
+    post:
+      summary: Exchange a one-time setup or launch ticket for a scoped credential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [project_id, ticket]
+              properties:
+                project_id: { type: string }
+                ticket: { type: string, minLength: 20, maxLength: 200 }
+                sdk_version: { type: string, maxLength: 40 }
+      responses:
+        "200":
+          description: Credential issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credential: { type: string }
+                  mode: { type: string, enum: [setup, live] }
+                  expires_at: { type: string, format: date-time }
+                  project_id: { type: string }
+                  study: { $ref: "#/components/schemas/StudyInfo" }
+                  setup:
+                    type: object
+                    properties:
+                      setup_session_id: { type: string }
+                      expires_at: { type: string, format: date-time }
+        "403": { description: origin_not_allowed }
+        "404": { description: not_found }
+        "410": { description: ticket_consumed | ticket_expired | session_expired }
+        "429": { description: rate_limited }
+  /api/sdk/session:
+    get:
+      summary: Current authorized session state (recovery and goal acknowledgement)
+      security: [{ sdkCredential: [] }]
+      responses:
+        "200": { description: Session state }
+        "401": { description: unauthenticated }
+        "410": { description: session_expired }
+  /api/sdk/events:
+    post:
+      summary: Ingest a batch of validated events
+      security: [{ sdkCredential: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, events]
+              properties:
+                schema_version: { const: 1 }
+                sdk_version: { type: string }
+                events:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items: { $ref: "#/components/schemas/SdkEvent" }
+      responses:
+        "200":
+          description: Batch processed (per-event results)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted: { type: array, items: { type: string } }
+                  duplicates: { type: array, items: { type: string } }
+                  rejected:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        event_id: { type: [string, "null"] }
+                        code:
+                          type: string
+                          enum: [invalid_schema, wrong_project, wrong_study, wrong_session, wrong_mode, setup_only_event, clock_skew, after_deadline, session_finalized, custom_event_not_allowed]
+                        message: { type: string }
+                  goal:
+                    type: [object, "null"]
+                    properties:
+                      verified: { type: boolean }
+                      verified_event_id: { type: [string, "null"] }
+                  session_status: { type: [string, "null"], enum: [pending, completed, dropped, invalid, null] }
+        "401": { description: unauthenticated }
+        "410": { description: session_expired }
+        "413": { description: payload_too_large }
+        "422": { description: All events rejected }
+        "429": { description: rate_limited }
+  /api/sdk/session/end:
+    post:
+      summary: End a live task (flush events first); returns the feedback handoff URL
+      security: [{ sdkCredential: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, enum: [finished, gave_up, consent_withdrawn] }
+      responses:
+        "200":
+          description: Final state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session_status: { type: string, enum: [pending, completed, dropped, invalid] }
+                  final_reason: { type: [string, "null"] }
+                  feedback_url: { type: [string, "null"] }
+        "403": { description: credential_scope }
+        "410": { description: session_expired }
+  /api/sdk/setup/finish:
+    post:
+      summary: End the builder's setup walkthrough
+      security: [{ sdkCredential: [] }]
+      responses:
+        "200": { description: Finished }

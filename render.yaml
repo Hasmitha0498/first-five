@@ -1,0 +1,42 @@
+# First Five — Render Blueprint
+# One web service (frontend + API) and one PostgreSQL database.
+# Both use Render's FREE plans; see docs/deployment/RENDER.md for limitations
+# (web service sleeps after 15 min idle; free Postgres expires after 30 days).
+# Integration credentials (PostHog, AgenticOrg, Pine Labs, SDK_SCRIPT_URL) are
+# added later in the Render dashboard — never committed here.
+
+databases:
+  - name: first-five-db
+    plan: free
+    region: singapore
+    databaseName: firstfive
+    user: firstfive
+    postgresMajorVersion: "16"
+    # No external connections; the web service uses the private internal URL.
+    ipAllowList: []
+
+services:
+  - type: web
+    name: first-five
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm ci --include=dev && npm run build
+    # Migrations run at start because pre-deploy commands aren't available on free instances.
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: first-five-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: PAID_STUDY_PRICE_MINOR
+        value: "9900"
+      # Paid checkout stays closed until explicitly enabled after the full study can be delivered.
+      - key: PAYMENTS_ENABLED
+        value: "false"
