@@ -435,6 +435,8 @@ export interface AdminPaymentDto {
   amountLabel: string;
   buyerEmail: string;
   utr: string | null;
+  /** Rejected by an admin; can still be confirmed if the money did arrive. */
+  correctable: boolean;
   createdAt: string;
   updatedAt: string;
 }
