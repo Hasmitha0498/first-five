@@ -32,7 +32,8 @@ test("builder signs up, connects a website, gets a unique snippet, and saves a d
   await expect(page.getByText("No one has taken this test yet.")).toBeVisible();
 
   await page.getByRole("link", { name: "Findings", exact: true }).click();
-  await expect(page.getByText("AI findings aren't available yet.").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run analysis" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start a report" })).toBeVisible();
 
   // Logout / login
   await page.getByRole("button", { name: "Log out" }).click();

@@ -25,6 +25,9 @@ export default async function globalSetup() {
       DATABASE_URL,
       SESSION_SECRET: "e2e-secret-e2e-secret-e2e-secret-012345",
       LOG_LEVEL: "warn",
+      // Pin payment config: Prisma would otherwise load these from a developer's local .env.
+      PAYMENTS_ENABLED: "false",
+      UPI_PAYEE_VPA: "",
     },
     stdio: "inherit",
   });
