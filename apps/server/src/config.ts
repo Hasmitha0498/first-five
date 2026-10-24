@@ -62,9 +62,17 @@ const EnvSchema = z.object({
   POSTHOG_PERSONAL_API_KEY: optionalString,
   POSTHOG_PROJECT_ID: optionalString,
 
-  // AgenticOrg UX Director (future integration).
+  // AgenticOrg UX Director. Agents are run by stored agent ID (execution-scoped key).
   AGENTICORG_BASE_URL: optionalString,
   AGENTICORG_API_KEY: optionalString,
+  /** Stored agent that writes the contextual interview question (Q2). */
+  AGENTICORG_Q2_AGENT_ID: optionalString,
+  /** Stored agent that drafts the research report; every run queues an AgenticOrg HITL approval. */
+  AGENTICORG_REPORT_AGENT_ID: optionalString,
+  /** Key allowed to read approvals (approvals:read). Without it, decisions can't be confirmed and publishing stays blocked. */
+  AGENTICORG_APPROVALS_API_KEY: optionalString,
+  AGENTICORG_Q2_TIMEOUT_MS: int(8000),
+  AGENTICORG_REPORT_TIMEOUT_MS: int(150_000),
   AGENTICORG_WORKFLOW_ID: optionalString,
   AGENTICORG_WEBHOOK_SECRET: optionalString,
 

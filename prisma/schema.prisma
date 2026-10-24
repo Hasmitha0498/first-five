@@ -616,6 +616,8 @@ model Report {
   shareToken      String?      @unique
   publishedAt     DateTime?
   failureReason   String?
+  // Validated UX Director output kept verbatim for audit (agenticorg reports only).
+  agentOutput     Json?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
@@ -640,6 +642,8 @@ model ReportFinding {
   evidenceStrength     String   @default("inconclusive")
   suggestion           String?
   retestMetric         String?
+  // Copy-ready prompt for an AI coding tool written by the UX Director (C9).
+  improvementPrompt    String?
   supportingSessionIds String[] @default([])
   counterSessionIds    String[] @default([])
   source               String
@@ -682,6 +686,8 @@ model AgentRun {
   status         String
   inputDigest    String?
   error          String?
+  // Raw run facts from the provider: run_id, confidence, hitl_trigger, latency.
+  details        Json?
   startedAt      DateTime  @default(now())
   finishedAt     DateTime?
 

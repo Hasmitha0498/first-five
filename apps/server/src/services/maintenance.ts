@@ -1,5 +1,6 @@
 import type { AppContext } from "../context";
 import type { PostHogCaptureEvent } from "../integrations/posthog";
+import { syncAgenticOrgApprovals } from "./reports";
 import { reconcileExpired } from "./sessions";
 
 const MAX_ATTEMPTS = 8;
@@ -80,5 +81,9 @@ export async function runMaintenance(ctx: AppContext) {
   const sessions = await reconcileExpired(ctx);
   const outbox = await dispatchOutbox(ctx);
   const purged = await purgeExpired(ctx);
-  return { sessions, outbox, purged };
+  const approvals = await syncAgenticOrgApprovals(ctx).catch((err: Error) => {
+    ctx.log.warn({ err: err.message }, "AgenticOrg approval sync failed");
+    return null;
+  });
+  return { sessions, outbox, purged, approvals };
 }

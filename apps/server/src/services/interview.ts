@@ -14,7 +14,7 @@ export const STANDARD_QUESTIONS = {
   q3_improve: { position: 3, kind: "open_text" as const, text: "What would have made this task easier?" },
 };
 
-const CONTEXTUAL_QUESTION_TIMEOUT_MS = 2500;
+const MEANINGFUL_FOR_QUESTION = new Set(["ff_page_viewed", "ff_element_clicked", "ff_form_submitted", "ff_custom_event", "ff_client_error"]);
 
 /** Resolve the feedback handoff token (short-lived, single-session scope). */
 export async function resolveFeedbackAccess(ctx: AppContext, studyPublicId: string, token: string | undefined) {
@@ -37,38 +37,72 @@ async function ensureQuestions(ctx: AppContext, sessionId: string): Promise<Inte
   // Contextual question: only when the UX Director is genuinely connected; otherwise the neutral fallback.
   let q2Text: string = STANDARD_QUESTIONS.q2_context.fallbackText;
   let q2Source: "fallback" | "agenticorg" = "fallback";
+  let q2RunId: string | null = null;
   if (ctx.providers.uxDirector.configured && ctx.providers.uxDirector.implemented) {
+    const timeoutMs = ctx.config.AGENTICORG_Q2_TIMEOUT_MS;
+    const run = await ctx.db.agentRun.create({ data: { provider: "agenticorg", kind: "contextual_question", studySessionId: sessionId, status: "running" } });
+    let outcome: { status: string; error?: string; externalRunId?: string; details?: object } = { status: "fallback", error: "timed out" };
     try {
       const session = await ctx.db.studySession.findUniqueOrThrow({ where: { id: sessionId }, include: { studyVersion: true, events: true } });
+      run.studyId = session.studyId;
       const analysis = analyzeTimeline(session.events, { startedAt: session.startedAt, verifiedGoalEventId: session.verifiedGoalEventId });
       const generated = await Promise.race([
         ctx.providers.uxDirector.generateContextualQuestion(
           {
             sessionPublicId: session.publicId,
             task: session.studyVersion.task,
+            goal: { type: session.studyVersion.goalType, target: session.studyVersion.goalTarget },
             outcome: session.status,
-            pagesVisited: analysis.pagePaths,
-            notableObservations: analysis.timeline
-              .filter((t) => t.isBacktrack || t.isRepeat)
-              .slice(0, 10)
-              .map((t) => ({ eventId: t.eventId, description: `${t.isBacktrack ? "Returned to" : "Clicked again on"} ${t.label ?? t.pagePath ?? t.name}` })),
+            events: analysis.timeline
+              .filter((t) => MEANINGFUL_FOR_QUESTION.has(t.name))
+              .slice(0, 50)
+              .map((t) => ({
+                event_id: t.eventId,
+                seq: t.sequence,
+                name: t.name,
+                route: t.pagePath,
+                element_key: t.elementKey,
+                element_type: t.elementType,
+                element_label: t.label,
+                t_ms_from_start: t.offsetMs,
+              })),
           },
-          { timeoutMs: CONTEXTUAL_QUESTION_TIMEOUT_MS },
+          { timeoutMs },
         ),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), CONTEXTUAL_QUESTION_TIMEOUT_MS)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
       ]);
       if (generated?.question) {
         q2Text = sanitizeParticipantText(generated.question, 300) ?? q2Text;
         q2Source = "agenticorg";
+        q2RunId = run.id;
+        outcome = {
+          status: "completed",
+          externalRunId: generated.externalRunId,
+          details: { evidenceEventId: generated.evidenceEventId, hitlTriggered: generated.hitlTriggered },
+        };
+      } else if (generated === null) {
+        outcome = { status: "fallback", error: "timed out or no usable question" };
       }
     } catch (err) {
+      outcome = { status: "fallback", error: (err as Error).message.slice(0, 500) };
       ctx.log.warn({ err: (err as Error).message }, "contextual question unavailable; using fallback");
     }
+    await ctx.db.agentRun.update({
+      where: { id: run.id },
+      data: {
+        studyId: run.studyId,
+        status: outcome.status,
+        error: outcome.error ?? null,
+        externalRunId: outcome.externalRunId ?? null,
+        details: (outcome.details ?? null) as object,
+        finishedAt: new Date(),
+      },
+    });
   }
 
   const defs = [
     { questionKey: "q1_ease", position: 1, kind: "ease_scale", text: STANDARD_QUESTIONS.q1_ease.text, source: "standard" },
-    { questionKey: "q2_context", position: 2, kind: "open_text", text: q2Text, source: q2Source },
+    { questionKey: "q2_context", position: 2, kind: "open_text", text: q2Text, source: q2Source, agentRunId: q2RunId },
     { questionKey: "q3_improve", position: 3, kind: "open_text", text: STANDARD_QUESTIONS.q3_improve.text, source: "standard" },
   ];
   await ctx.db.interviewQuestion.createMany({ data: defs.map((d) => ({ ...d, studySessionId: sessionId })), skipDuplicates: true });
