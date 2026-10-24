@@ -1,4 +1,4 @@
-import { EASE_SCALE, FINAL_REASON_LABELS, type SessionDetail } from "@firstfive/shared";
+import { EASE_SCALE, FINAL_REASON_LABELS, type SessionDetail, describeCustomEventDetails } from "@firstfive/shared";
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { Flag, Repeat, Undo2 } from "lucide-react";
@@ -77,6 +77,9 @@ export function SessionDetailPage() {
                         </Pill>
                       )}
                     </div>
+                    {e.name === "ff_custom_event" && describeCustomEventDetails(e.details) && (
+                      <div className="mt-0.5 text-xs text-ink-soft">{describeCustomEventDetails(e.details)}</div>
+                    )}
                     <div className="mt-0.5 text-xs tabular-nums text-ink-muted">+{formatDuration(e.offsetMs)}</div>
                   </div>
                 </li>

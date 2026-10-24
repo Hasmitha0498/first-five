@@ -89,94 +89,91 @@ export const PROVIDER_STATUS_LABELS = {
   error: "Degraded / Error",
 } as const;
 
-// ───────────────────────── Custom event labels ─────────────────────────
+// ───────────────────────── Custom event context ─────────────────────────
 
 export type EventDetails = Record<string, string | number | boolean>;
 
+/** Internal keys that never add context for a reader. */
+const INTERNAL_KEYS = new Set(["custom_event_name", "ff_site"]);
 /**
- * Property keys safe to show on the dashboard. Everything else a website sends with a
- * custom event (e.g. selected page text) is never returned by the API.
+ * Free-text values under these keys can carry what a person typed or selected; they are
+ * never returned to the dashboard (booleans and numbers under them are fine, e.g. has_email).
  */
-export const DISPLAY_DETAIL_KEYS = [
-  "cta",
-  "label",
-  "element",
-  "field",
-  "section",
-  "depth",
-  "from_depth",
-  "max_depth",
-  "hover_ms",
-  "dwell_ms",
-  "time_on_page_ms",
-  "reason",
-  "count",
-  "ff_page",
-  "product",
-  "step",
-  "plan",
-] as const;
+const SENSITIVE_TEXT_KEY = /text|select|query|search|message|comment|note|email|phone|mobile|name|address|value|input|token|pass|otp|card|cvv|iban|ssn|dob|birth/i;
+/** Keys whose value names the thing the event is about, in order of preference. */
+const SUBJECT_KEYS = ["label", "cta", "element", "product", "field", "section", "step", "item"];
 
-/** Keep only display-safe details (strings capped at 80 chars). */
+/** Every display-safe property of a custom event (strings capped at 60 chars, at most 10). */
 export function pickDisplayDetails(props: unknown): EventDetails | null {
   if (!props || typeof props !== "object") return null;
   const out: EventDetails = {};
-  for (const key of DISPLAY_DETAIL_KEYS) {
-    const v = (props as Record<string, unknown>)[key];
-    if (typeof v === "string" && v.trim()) out[key] = v.trim().slice(0, 80);
-    else if (typeof v === "number" && Number.isFinite(v)) out[key] = v;
+  for (const [key, v] of Object.entries(props as Record<string, unknown>)) {
+    if (Object.keys(out).length >= 10) break;
+    if (INTERNAL_KEYS.has(key)) continue;
+    if (typeof v === "string") {
+      if (!v.trim() || SENSITIVE_TEXT_KEY.test(key)) continue;
+      out[key] = v.trim().slice(0, 60);
+    } else if (typeof v === "number" && Number.isFinite(v)) out[key] = v;
     else if (typeof v === "boolean") out[key] = v;
   }
   return Object.keys(out).length ? out : null;
 }
 
-const seconds = (ms: unknown) => (typeof ms === "number" ? ` (${(ms / 1000).toFixed(1)}s)` : "");
-const quoted = (v: unknown) => (typeof v === "string" && v ? `“${v}”` : "");
-
-/** "cta_hesitate" -> "Cta hesitate" for names without a specific label. */
+/** "cta_hesitate" -> "Cta hesitate". */
 export function humanizeEventName(name: string): string {
-  const words = name.replace(/[_-]+/g, " ").trim();
+  const words = name.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Custom event";
 }
 
-/** Plain-language description of a website-reported (custom) event. */
-export function describeCustomEvent(name: string | null | undefined, d: EventDetails | null | undefined): string {
-  const x = d ?? {};
-  const target = quoted(x.label) || quoted(x.cta) || quoted(x.element) || quoted(x.product);
-  switch (name) {
-    case "cta_view":
-      return `Saw ${quoted(x.cta) || "a call to action"}`;
-    case "cta_hover":
-      return `Hovered over ${quoted(x.cta) || "a call to action"}${seconds(x.hover_ms)}`;
-    case "cta_hesitate":
-      return `Hesitated on ${quoted(x.cta) || "a call to action"}${seconds(x.dwell_ms)}`;
-    case "cta_click":
-      return `Clicked ${target || "a call to action"}`;
-    case "element_click":
-      return `Clicked ${target || "an element"}`;
-    case "rage_click":
-      return `Rage-clicked ${target || "an element"}${typeof x.count === "number" ? ` (${x.count}×)` : ""}`;
-    case "scroll_depth":
-      return typeof x.depth === "number" ? `Scrolled to ${x.depth}%` : "Scrolled down";
-    case "scroll_reversal":
-      return `Scrolled back up${typeof x.from_depth === "number" ? ` from ${x.from_depth}%` : ""}`;
-    case "section_view":
-      return `Viewed section ${quoted(x.section) || ""}`.trim();
-    case "field_focus":
-      return `Started field ${quoted(x.field) || ""}`.trim();
-    case "field_complete":
-      return `Filled in field ${quoted(x.field) || ""}`.trim();
-    case "field_abandon":
-      return `Left field ${quoted(x.field) || ""} empty`.replace("  ", " ");
-    case "text_select":
-      return "Selected text on the page";
-    case "page_view":
-      return `Page view reported by the website${typeof x.ff_page === "string" ? ` (${x.ff_page})` : ""}`;
-    case "page_exit":
-      return `Left the page${typeof x.reason === "string" ? ` (${x.reason.replace(/_/g, " ")})` : ""}`;
-    case "identify":
-      return "Entered contact details";
-    default:
-      return name ? `${humanizeEventName(name)}${target ? ` ${target}` : ""}` : "Custom event";
+function humanizeKey(key: string): string {
+  return humanizeEventName(key.replace(/_(ms|pct|percent)$/i, "").replace(/^ff_/, ""));
+}
+
+function formatValue(key: string, v: string | number | boolean): string {
+  if (typeof v === "boolean") return v ? "yes" : "no";
+  if (typeof v === "number") {
+    if (/_ms$/i.test(key)) return v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}ms`;
+    if (/depth|pct|percent/i.test(key)) return `${v}%`;
+    return Number.isInteger(v) ? String(v) : v.toFixed(2);
   }
+  return v.replace(/_/g, " ");
+}
+
+function subjectOf(d: EventDetails): { key: string; value: string } | null {
+  for (const key of SUBJECT_KEYS) {
+    const v = d[key];
+    if (typeof v === "string" && v) return { key, value: v.replace(/_/g, " ") };
+  }
+  return null;
+}
+
+/**
+ * Headline for a website-reported event, built only from the data it carries:
+ * name, what it was about, and where it happened, e.g. `Cta hesitate "place order" on /checkout`.
+ */
+export function describeCustomEvent(
+  name: string | null | undefined,
+  details: EventDetails | null | undefined,
+  pagePath?: string | null,
+): string {
+  const d = details ?? {};
+  const subject = subjectOf(d);
+  const page = pagePath || (typeof d.ff_page === "string" ? d.ff_page : null);
+  return [
+    name ? humanizeEventName(name) : "Custom event",
+    subject ? `“${subject.value}”` : "",
+    page ? `on ${page.startsWith("/") ? page : `/${page}`}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** Secondary line with every other property, e.g. `Dwell 5.2s · Max depth 60% · Converted no`. */
+export function describeCustomEventDetails(details: EventDetails | null | undefined): string {
+  const d = details ?? {};
+  const subject = subjectOf(d);
+  return Object.entries(d)
+    .filter(([key]) => key !== "ff_page" && key !== subject?.key)
+    .map(([key, v]) => `${humanizeKey(key)} ${formatValue(key, v)}`)
+    .join(" · ");
 }
