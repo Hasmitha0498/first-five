@@ -1,6 +1,7 @@
 import type { AppContext } from "../context";
 import type { PostHogCaptureEvent } from "../integrations/posthog";
 import { refreshStaleSnapshots } from "./posthog-metrics";
+import { syncAgenticOrgApprovals } from "./reports";
 import { reconcileExpired } from "./sessions";
 
 const MAX_ATTEMPTS = 8;
@@ -80,7 +81,14 @@ export async function purgeExpired(ctx: AppContext) {
 export async function runMaintenance(ctx: AppContext) {
   const sessions = await reconcileExpired(ctx);
   const outbox = await dispatchOutbox(ctx);
-  const analytics = await refreshStaleSnapshots(ctx);
+  const analytics = await refreshStaleSnapshots(ctx).catch((err: Error) => {
+    ctx.log.warn({ err: err.message }, "analytics snapshot refresh failed");
+    return null;
+  });
   const purged = await purgeExpired(ctx);
-  return { sessions, outbox, analytics, purged };
+  const approvals = await syncAgenticOrgApprovals(ctx).catch((err: Error) => {
+    ctx.log.warn({ err: err.message }, "AgenticOrg approval sync failed");
+    return null;
+  });
+  return { sessions, outbox, analytics, purged, approvals };
 }

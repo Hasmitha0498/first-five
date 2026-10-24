@@ -312,6 +312,10 @@ export interface ReportDetail extends ReportSummary {
   approvals: { id: string; decision: string; channel: string; reviewer: string | null; note: string | null; revision: number; createdAt: string }[];
   shareUrl: string | null;
   approvalPolicy: { channel: "first_five" | "agenticorg"; description: string };
+  /** Why a UX Director analysis failed (validation or provider error). */
+  failureReason: string | null;
+  /** AgenticOrg run reference (correlation_id) for UX Director reports. */
+  externalRunId: string | null;
 }
 
 export interface PublicStudyInfo {

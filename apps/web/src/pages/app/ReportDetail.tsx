@@ -21,7 +21,18 @@ interface Quote {
 export function ReportDetailPage() {
   const { id } = useParams();
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["report", id], queryFn: () => api<ReportDetail>(`/api/reports/${id}`) });
+  const q = useQuery({
+    queryKey: ["report", id],
+    queryFn: () => api<ReportDetail>(`/api/reports/${id}`),
+    // UX Director runs finish in the background; AgenticOrg approvals arrive through the sync.
+    refetchInterval: (query) => {
+      const r = query.state.data;
+      if (!r) return false;
+      if (r.status === "processing") return 5000;
+      if (r.status === "awaiting_review" && r.approvalPolicy.channel === "agenticorg") return 30000;
+      return false;
+    },
+  });
   const [editing, setEditing] = useState<FindingDto | "new" | null>(null);
   const [note, setNote] = useState("");
   const setReport = (r: ReportDetail) => {
@@ -216,7 +227,12 @@ function ReviewPanel({ r, note, setNote, run, pending }: { r: ReportDetail; note
           )}
           {r.status === "awaiting_review" && r.approvalPolicy.channel === "agenticorg" && (
             <Alert tone="info" className="mt-4">
-              Waiting for approval in AgenticOrg.
+              Waiting for approval in AgenticOrg{r.externalRunId ? ` (run ${r.externalRunId})` : ""}. Approve or reject it in AgenticOrg's Approvals page; this page updates on its own.
+            </Alert>
+          )}
+          {r.status === "failed" && (
+            <Alert tone="danger" className="mt-4">
+              The analysis didn't produce a report{r.failureReason ? `: ${r.failureReason}` : "."} Nothing was stored. Run the analysis again from Findings.
             </Alert>
           )}
 
