@@ -78,6 +78,17 @@ function launchUrlFor(websiteUrl: string, startPath: string, ticket: string) {
   return u.href;
 }
 
+/** Poll until the session has stored an event with client_sequence >= target, or the timeout passes. */
+export async function waitForSequence(ctx: AppContext, sessionId: string, target: number, timeoutMs: number) {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    const top = await ctx.db.eventRecord.aggregate({ where: { studySessionId: sessionId }, _max: { clientSequence: true } });
+    if ((top._max.clientSequence ?? 0) >= target) return true;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
+}
+
 export function feedbackUrlFor(appUrl: string, studyPublicId: string, ticket: string) {
   return `${appUrl}/t/${studyPublicId}/feedback#h=${ticket}`;
 }

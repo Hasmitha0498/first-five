@@ -218,7 +218,7 @@ export async function finishSetup(ctx: AppContext, r: ResolvedCredential) {
   if (r.credential.mode !== "setup") throw sdkError(403, "credential_scope", "Not a setup credential.");
   await ctx.db.setupSession.updateMany({ where: { id: r.credential.setupSessionId!, status: "active" }, data: { status: "finished", endedAt: new Date() } });
   await ctx.db.sdkCredential.update({ where: { id: r.credential.id }, data: { revokedAt: new Date() } });
-  return { status: "finished" as const };
+  return { status: "finished" as const, return_url: `${ctx.config.appUrl}/app/websites/${r.project.id}/journey` };
 }
 
 // ───────────────────────────── Events ─────────────────────────────

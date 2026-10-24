@@ -5,12 +5,13 @@
  * enforces the specific project's allowlist.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { EndRequestSchema, SDK_LIMITS, type EndResponse } from "@firstfive/sdk-contract";
+import { END_FLUSH_GRACE_MS, EndRequestSchema, SDK_LIMITS, type EndResponse } from "@firstfive/sdk-contract";
 import { z } from "zod";
 import type { AppContext } from "../context";
 import { sha256 } from "../lib/crypto";
 import { AppError } from "../lib/errors";
-import { endSession, feedbackUrlFor } from "../services/sessions";
+import { scheduleOutboxDispatch } from "../services/maintenance";
+import { endSession, feedbackUrlFor, waitForSequence } from "../services/sessions";
 import { exchangeTicket, finishSetup, getSdkConfig, getSessionState, ingestEvents, isRegisteredOrigin, resolveCredential } from "../services/sdk";
 
 declare module "fastify" {
@@ -45,7 +46,7 @@ export async function sdkRoutes(app: FastifyInstance, ctx: AppContext) {
     if (req.sdkAllowedOrigin) {
       reply
         .header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        .header("Access-Control-Allow-Headers", "content-type, authorization")
+        .header("Access-Control-Allow-Headers", "content-type, authorization, x-firstfive-sdk")
         .header("Access-Control-Max-Age", "600");
     }
     return reply.status(204).send();
@@ -80,6 +81,8 @@ export async function sdkRoutes(app: FastifyInstance, ctx: AppContext) {
     async (req, reply) => {
       const r = await resolveCredential(ctx, req.headers.authorization, req.headers.origin);
       const result = await ingestEvents(ctx, r, req.body);
+      // deliver to PostHog right away instead of waiting for the sweep (free instances sleep)
+      if (result.accepted.length) scheduleOutboxDispatch(ctx);
       return reply.status(result.rejected.length && !result.accepted.length && !result.duplicates.length ? 422 : 200).send(result);
     },
   );
@@ -87,7 +90,11 @@ export async function sdkRoutes(app: FastifyInstance, ctx: AppContext) {
   app.post("/api/sdk/session/end", { config: { rateLimit: { max: 20, timeWindow: "1 minute", keyGenerator: credentialKey } } }, async (req): Promise<EndResponse> => {
     const r = await resolveCredential(ctx, req.headers.authorization, req.headers.origin);
     if (r.credential.mode !== "live" || !r.session) throw new AppError(403, "credential_scope", "Not a live study credential.");
-    const { reason } = EndRequestSchema.parse(req.body);
+    const { reason, last_client_sequence } = EndRequestSchema.parse(req.body);
+    // C3: give in-flight events (e.g. the goal click) a moment to land before finalising
+    if (last_client_sequence !== undefined && r.session.status === "pending") {
+      await waitForSequence(ctx, r.session.id, last_client_sequence, END_FLUSH_GRACE_MS);
+    }
     const result = await endSession(ctx, r.session.id, reason, "sdk");
     return {
       session_status: result.status,

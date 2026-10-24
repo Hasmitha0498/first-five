@@ -39,13 +39,35 @@ export async function dispatchOutbox(ctx: AppContext, limit = 200) {
   }
 }
 
+let dispatching: Promise<unknown> | null = null;
+let again = false;
+
+/** Fire-and-forget outbox delivery after an events commit; at most one run in flight per process. */
+export function scheduleOutboxDispatch(ctx: AppContext) {
+  if (!ctx.providers.analytics.configured) return;
+  if (dispatching) {
+    again = true;
+    return;
+  }
+  dispatching = dispatchOutbox(ctx)
+    .catch((err) => ctx.log.warn({ err: (err as Error).message }, "outbox dispatch failed"))
+    .finally(() => {
+      dispatching = null;
+      if (again) {
+        again = false;
+        scheduleOutboxDispatch(ctx);
+      }
+    });
+}
+
 /** Retention and housekeeping. */
 export async function purgeExpired(ctx: AppContext) {
   const now = new Date();
   const dayAgo = new Date(now.getTime() - 86_400_000);
   const [events, outbox, authSessions, tickets, credentials, setups] = await Promise.all([
     ctx.db.eventRecord.deleteMany({ where: { purgeAfter: { lt: now } } }),
-    ctx.db.outboxMessage.deleteMany({ where: { purgeAfter: { lt: now } } }),
+    // never drop undelivered analytics: only delivered (or permanently dead) rows age out
+    ctx.db.outboxMessage.deleteMany({ where: { purgeAfter: { lt: now }, status: { in: ["delivered", "dead"] } } }),
     ctx.db.authSession.deleteMany({ where: { expiresAt: { lt: now } } }),
     ctx.db.sdkTicket.deleteMany({ where: { expiresAt: { lt: dayAgo } } }),
     ctx.db.sdkCredential.deleteMany({ where: { expiresAt: { lt: dayAgo } } }),
