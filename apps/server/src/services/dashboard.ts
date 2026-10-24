@@ -3,7 +3,9 @@ import type { EventRecord, InterviewQuestion, InterviewResponse, ParticipantInvi
 import type { AppContext } from "../context";
 import { notFound } from "../lib/errors";
 import { providerStatus } from "../integrations/registry";
+import { scheduleOutboxDispatch } from "./maintenance";
 import { computeStudyMetrics } from "./metrics";
+import { readAnalyticsSnapshot, refreshInBackground } from "./posthog-metrics";
 import { listReportsForStudy } from "./reports";
 import { reconcileExpired } from "./sessions";
 import { getOwnedStudy, getStudyDetail } from "./studies";
@@ -54,6 +56,10 @@ export async function getDashboard(ctx: AppContext, userId: string, studyId: str
   const study = await getStudyDetail(ctx, userId, studyId);
   const v = version ?? study.currentVersion.version;
   const sessions = await loadSessions(ctx, owned.id, v);
+  // free instances sleep, so requests also move analytics along (PRD §5.7): deliver queued events, refresh stale details
+  scheduleOutboxDispatch(ctx);
+  const snapshot = await readAnalyticsSnapshot(ctx, owned.id, v);
+  if (snapshot.stale) refreshInBackground(ctx, owned.id, v);
   const metrics = computeStudyMetrics(
     sessions.map((s) => ({
       inviteId: s.inviteId,
@@ -92,7 +98,11 @@ export async function getDashboard(ctx: AppContext, userId: string, studyId: str
       topPages: [...pageCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([path, attempts]) => ({ path, attempts })),
       funnel,
     },
-    analytics: { provider: "postgres", posthogStatus },
+    analytics: {
+      provider: snapshot.details.status === "ready" ? "posthog" : "postgres",
+      posthogStatus,
+      details: snapshot.details,
+    },
     insights: {
       available: reports.some((r) => r.source === "agenticorg"),
       uxDirectorStatus,

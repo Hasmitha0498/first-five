@@ -175,6 +175,32 @@ export interface StudyMetrics {
   feedbackCoverage: RateValue;
 }
 
+export type AnalyticsDetailsStatus = "ready" | "processing" | "unavailable" | "not_configured";
+
+/** PostHog-sourced journey details for one study version. Counts on the dashboard stay Postgres-authoritative. */
+export interface AnalyticsDetails {
+  status: AnalyticsDetailsStatus;
+  computedAt: string | null;
+  /** Latest PostHog event timestamp included in this snapshot. */
+  eventCutoff: string | null;
+  cohortSize: number;
+  elements: { path: string | null; elementKey: string; label: string | null; sessions: number; clicks: number }[];
+  paths: { steps: string[]; sessions: number; completed: number }[];
+  transitions: { from: string; to: string; sessions: number }[];
+  /** Last observed step of dropped attempts; never a stated cause. */
+  lastStepBeforeDrop: { sessionPublicId: string; path: string | null; elementKey: string | null }[];
+  /** `observed: false` means no ff_client_error arrived, which is not the same as "no errors". */
+  errors: { observed: false } | { observed: true; byPath: { path: string | null; count: number; sessions: number }[] };
+  dataQuality: {
+    postgresEvents: number;
+    posthogEvents: number;
+    missingInPosthog: number;
+    sessionsWithoutEvents: number;
+    outbox: { pending: number; failed: number; dead: number };
+    deliveryLagMs: number | null;
+  };
+}
+
 export interface DashboardResponse {
   study: StudyDetail;
   metrics: StudyMetrics;
@@ -185,7 +211,7 @@ export interface DashboardResponse {
     topPages: { path: string; attempts: number }[];
     funnel: { label: string; reached: number; previous: number }[] | null;
   };
-  analytics: { provider: "postgres" | "posthog"; posthogStatus: ProviderStatus };
+  analytics: { provider: "postgres" | "posthog"; posthogStatus: ProviderStatus; details: AnalyticsDetails | null };
   insights: { available: boolean; uxDirectorStatus: ProviderStatus; latestReport: ReportSummary | null };
 }
 

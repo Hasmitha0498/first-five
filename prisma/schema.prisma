@@ -395,13 +395,14 @@ model Study {
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
 
-  project     Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  creditGrant AccessGrant?        @relation(fields: [creditGrantId], references: [id])
-  versions    StudyVersion[]
-  invites     ParticipantInvite[]
-  sessions    StudySession[]
-  reports     Report[]
-  agentRuns   AgentRun[]
+  project            Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creditGrant        AccessGrant?        @relation(fields: [creditGrantId], references: [id])
+  versions           StudyVersion[]
+  invites            ParticipantInvite[]
+  sessions           StudySession[]
+  reports            Report[]
+  agentRuns          AgentRun[]
+  analyticsSnapshots AnalyticsSnapshot[]
 
   @@index([projectId])
   @@map("studies")
@@ -823,4 +824,35 @@ model AuditLog {
   @@index([resourceType, resourceId])
   @@index([actorUserId])
   @@map("audit_logs")
+}
+
+// ───────────────────────────── Analytics ─────────────────────────────
+
+enum AnalyticsSnapshotStatus {
+  ready
+  processing
+  unavailable
+}
+
+// Cached, signed PostHog read for one study version. Postgres stays authoritative for counts.
+model AnalyticsSnapshot {
+  id               String                  @id @default(uuid()) @db.Uuid
+  studyId          String                  @db.Uuid
+  studyVersion     Int
+  status           AnalyticsSnapshotStatus @default(processing)
+  cohortHash       String                  @default("")
+  eventCutoff      DateTime?
+  details          Json                    @default("{}")
+  dataQuality      Json                    @default("{}")
+  signature        String?
+  lastError        String?
+  computedAt       DateTime?
+  refreshStartedAt DateTime?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  study Study @relation(fields: [studyId], references: [id], onDelete: Cascade)
+
+  @@unique([studyId, studyVersion])
+  @@map("analytics_snapshots")
 }

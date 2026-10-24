@@ -21,6 +21,7 @@ export interface FirstFiveEventForAnalytics {
   timestamp: string;
   projectPublicId: string;
   studyPublicId: string | null;
+  studyVersion?: number | null;
   sessionPublicId: string | null;
   mode: "setup" | "live";
   clientSequence: number | null;
@@ -56,6 +57,7 @@ export function mapToPostHogEvent(e: FirstFiveEventForAnalytics): PostHogCapture
       ff_event_id: e.eventId,
       ff_project_id: e.projectPublicId,
       ff_study_id: e.studyPublicId,
+      ff_study_version: e.studyVersion ?? null,
       ff_session_id: e.sessionPublicId,
       ff_mode: e.mode,
       ff_client_sequence: e.clientSequence,
@@ -81,7 +83,8 @@ export interface AnalyticsProvider {
   readonly canQuery: boolean;
   missingKeys(): string[];
   captureBatch(events: PostHogCaptureEvent[]): Promise<void>;
-  query<T = unknown[]>(hogql: string): Promise<T[]>;
+  /** `values` fill `{name}` placeholders server-side; never interpolate untrusted input into `hogql`. */
+  query<T = unknown[]>(hogql: string, values?: Record<string, unknown>): Promise<T[]>;
   verifyRoundTrip(): Promise<HealthResult>;
 }
 
@@ -131,7 +134,7 @@ export class PostHogAdapter implements AnalyticsProvider {
     if (!res.ok) throw new Error(`PostHog capture failed with HTTP ${res.status}`);
   }
 
-  async query<T = unknown[]>(hogql: string): Promise<T[]> {
+  async query<T = unknown[]>(hogql: string, values?: Record<string, unknown>): Promise<T[]> {
     if (!this.canQuery) throw new Error("PostHog query access is not configured");
     const res = await this.fetchImpl(`${this.apiHost}/api/projects/${encodeURIComponent(this.config.POSTHOG_PROJECT_ID!)}/query/`, {
       method: "POST",
@@ -139,7 +142,7 @@ export class PostHogAdapter implements AnalyticsProvider {
         "content-type": "application/json",
         authorization: `Bearer ${this.config.POSTHOG_PERSONAL_API_KEY}`,
       },
-      body: JSON.stringify({ query: { kind: "HogQLQuery", query: hogql } }),
+      body: JSON.stringify({ query: { kind: "HogQLQuery", query: hogql, ...(values ? { values } : {}) } }),
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) throw new Error(`PostHog query failed with HTTP ${res.status}`);
@@ -175,9 +178,9 @@ export class PostHogAdapter implements AnalyticsProvider {
       };
     }
     try {
-      const safeId = id.replace(/[^a-f0-9-]/g, "");
       const rows = await this.query(
-        `SELECT count() FROM events WHERE event = 'ff_integration_check' AND properties.ff_check_id = '${safeId}' AND timestamp > now() - INTERVAL 1 HOUR`,
+        "SELECT count() FROM events WHERE event = 'ff_integration_check' AND properties.ff_check_id = {check_id} AND timestamp > now() - INTERVAL 1 HOUR",
+        { check_id: id },
       );
       const count = Number((rows[0] as unknown[] | undefined)?.[0] ?? 0);
       if (count > 0) return { ok: true, status: "verified", message: "Test event captured and read back.", details: { checkId: id } };

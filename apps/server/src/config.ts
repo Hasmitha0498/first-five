@@ -51,9 +51,11 @@ const EnvSchema = z.object({
   EVENT_RETENTION_DAYS: int(30),
   OUTBOX_RETENTION_DAYS: int(14),
   SWEEP_INTERVAL_SECONDS: int(60),
+  /** How long a cached PostHog dashboard snapshot is served before a background refresh. */
+  ANALYTICS_SNAPSHOT_TTL_SECONDS: int(300),
   DISABLE_SCHEDULER: bool,
 
-  // PostHog Cloud (future integration).
+  // PostHog Cloud.
   /** Ingestion host, e.g. https://us.i.posthog.com or https://eu.i.posthog.com */
   POSTHOG_HOST: optionalString,
   /** Private API host for queries, e.g. https://us.posthog.com. Derived from POSTHOG_HOST when unset. */

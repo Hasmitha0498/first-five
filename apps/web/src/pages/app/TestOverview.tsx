@@ -1,11 +1,11 @@
-import type { DashboardResponse } from "@firstfive/shared";
+import type { AnalyticsDetails, DashboardResponse } from "@firstfive/shared";
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, Circle, Share2, Sparkles, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Alert, Card, CardHeader, CopyButton, EmptyState, ErrorState, LinkButton, Pill, Spinner } from "../../components/ui";
 import { ReportBadge } from "../../components/status";
 import { api, errorMessage } from "../../lib/api";
-import { formatDateTime, formatDuration } from "../../lib/format";
+import { formatDateTime, formatDuration, timeAgo } from "../../lib/format";
 import { useStudy } from "./TestLayout";
 
 export function TestOverviewPage() {
@@ -166,8 +166,12 @@ function Dashboard({ d }: { d: DashboardResponse }) {
             )}
           </div>
         )}
-        {d.analytics.posthogStatus !== "verified" && d.behavior.available && (
-          <p className="mt-2 text-xs text-ink-muted">Calculated from activity stored by First Five. Detailed path analytics will be added when the analytics integration is connected.</p>
+        {d.behavior.available && d.analytics.details && d.analytics.details.status !== "not_configured" ? (
+          <ObservedPaths details={d.analytics.details} hasFunnel={!!d.behavior.funnel} />
+        ) : (
+          d.behavior.available && (
+            <p className="mt-2 text-xs text-ink-muted">Calculated from activity stored by First Five. Detailed path analytics will be added when the analytics integration is connected.</p>
+          )
         )}
       </section>
 
@@ -210,6 +214,95 @@ function Dashboard({ d }: { d: DashboardResponse }) {
         </Card>
       </section>
     </>
+  );
+}
+
+/** PostHog-sourced journey details. Counts above stay authoritative from First Five's own records. */
+function ObservedPaths({ details: a, hasFunnel }: { details: AnalyticsDetails; hasFunnel: boolean }) {
+  const q = a.dataQuality;
+  const arriving = Math.max(q.missingInPosthog, q.outbox.pending + q.outbox.failed);
+  const hasData = a.paths.length > 0 || a.elements.length > 0;
+  return (
+    <div className="mt-4 space-y-4">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+        <span>
+          Observed in PostHog · updated {timeAgo(a.computedAt)}
+          {a.eventCutoff && ` · events through ${formatDateTime(a.eventCutoff)}`}
+        </span>
+        {a.status === "processing" && (
+          <Pill tone="info" dot>
+            Processing{arriving > 0 ? `: ${arriving} event${arriving === 1 ? "" : "s"} still arriving` : ""}
+          </Pill>
+        )}
+        {a.status === "unavailable" && (
+          <Pill tone="warning" dot>
+            Detailed analysis temporarily unavailable
+          </Pill>
+        )}
+      </div>
+      {a.status === "unavailable" && (
+        <p className="text-xs text-ink-muted">Counts above are from First Five's own records and stay correct.{hasData && " Details below are from the last successful refresh."}</p>
+      )}
+      {!hasData ? (
+        <Card className="p-5 text-sm text-ink-muted sm:p-6">Path details appear here a few minutes after participants' activity reaches PostHog.</Card>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {a.paths.length > 0 && (
+            <Card>
+              <CardHeader
+                title={hasFunnel ? "Alternative paths" : "Paths participants took"}
+                description="Page sequences actually observed, most common first."
+              />
+              <ul className="space-y-3 p-5 sm:p-6">
+                {a.paths.map((p, i) => (
+                  <li key={i} className="text-sm">
+                    <code className="block break-words font-mono">{p.steps.join(" → ")}</code>
+                    <span className="tabular-nums text-ink-muted">
+                      {p.sessions} of {a.cohortSize} attempt{a.cohortSize === 1 ? "" : "s"} · {p.completed} completed
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+          {a.elements.length > 0 && (
+            <Card>
+              <CardHeader title="What participants clicked" description="Distinct attempts that clicked each element." />
+              <ul className="space-y-3 p-5 sm:p-6">
+                {a.elements.slice(0, 8).map((e) => (
+                  <li key={`${e.path}|${e.elementKey}`} className="flex justify-between gap-3 text-sm">
+                    <span className="min-w-0 truncate">
+                      {e.label ?? e.elementKey} <code className="font-mono text-ink-muted">{e.path}</code>
+                    </span>
+                    <span className="shrink-0 tabular-nums text-ink-muted">
+                      {e.sessions} attempt{e.sessions === 1 ? "" : "s"} · {e.clicks} click{e.clicks === 1 ? "" : "s"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+          {a.lastStepBeforeDrop.length > 0 && (
+            <Card>
+              <CardHeader title="Last observed step (not necessarily the cause)" description="Where each dropped attempt was last seen." />
+              <ul className="space-y-2 p-5 text-sm sm:p-6">
+                {a.lastStepBeforeDrop.map((s) => (
+                  <li key={s.sessionPublicId} className="flex justify-between gap-3">
+                    <code className="truncate font-mono">{s.path ?? "No activity observed"}</code>
+                    {s.elementKey && <span className="shrink-0 text-ink-muted">{s.elementKey}</span>}
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+        </div>
+      )}
+      <p className="text-xs text-ink-muted">
+        {a.errors.observed
+          ? `Client errors: ${a.errors.byPath.map((e) => `${e.path ?? "unknown page"} (${e.count} in ${e.sessions} attempt${e.sessions === 1 ? "" : "s"})`).join(", ")}.`
+          : "No error events received. Error tracking may not be instrumented on this site, so this doesn't mean there were no errors."}
+      </p>
+    </div>
   );
 }
 

@@ -486,6 +486,7 @@ async function enqueueAnalytics(tx: Prisma.TransactionClient, ctx: AppContext, r
         timestamp: e.timestamp.toISOString(),
         projectPublicId: r.project.publicId,
         studyPublicId: r.session?.study.publicId ?? null,
+        studyVersion: r.session?.studyVersion.version ?? null,
         sessionPublicId: r.session?.publicId ?? null,
         mode: r.credential.mode,
         clientSequence: e.raw.client_sequence,

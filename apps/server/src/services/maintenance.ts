@@ -1,5 +1,6 @@
 import type { AppContext } from "../context";
 import type { PostHogCaptureEvent } from "../integrations/posthog";
+import { refreshStaleSnapshots } from "./posthog-metrics";
 import { reconcileExpired } from "./sessions";
 
 const MAX_ATTEMPTS = 8;
@@ -79,6 +80,7 @@ export async function purgeExpired(ctx: AppContext) {
 export async function runMaintenance(ctx: AppContext) {
   const sessions = await reconcileExpired(ctx);
   const outbox = await dispatchOutbox(ctx);
+  const analytics = await refreshStaleSnapshots(ctx);
   const purged = await purgeExpired(ctx);
-  return { sessions, outbox, purged };
+  return { sessions, outbox, analytics, purged };
 }
