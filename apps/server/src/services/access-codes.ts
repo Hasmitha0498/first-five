@@ -102,6 +102,10 @@ function assertRedeemable(rec: InvitationCode | null, now = new Date()) {
 export async function redeemCode(ctx: AppContext, userId: string, code: string) {
   const codeHash = hashCode(ctx.config.SESSION_SECRET, code);
   const rec = await ctx.db.invitationCode.findUnique({ where: { codeHash } });
+  // Tell the user they already have this code's access before reporting it as used up.
+  if (rec && (await ctx.db.invitationCodeRedemption.findUnique({ where: { codeId_userId: { codeId: rec.id, userId } } }))) {
+    throw new AppError(409, "already_redeemed", "You've already redeemed this code — its access is already on your account.", { code: "Already redeemed on your account" });
+  }
   assertRedeemable(rec);
   const plan = getPlan(ctx.config, rec!.planKey);
   try {

@@ -253,7 +253,7 @@ const REDEEM_MESSAGES: Record<string, string> = {
   code_expired: "This code has expired.",
   code_disabled: "This code is no longer active.",
   code_exhausted: "This code has already been fully used.",
-  already_redeemed: "You've already redeemed this code on your account.",
+  already_redeemed: "You've already redeemed this code — its access is already on your account.",
   rate_limited: "Too many attempts. Please wait a few minutes and try again.",
 };
 

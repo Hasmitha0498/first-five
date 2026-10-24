@@ -79,6 +79,17 @@ describe("invitation codes and entitlements", () => {
     expect(stored.redemptionCount).toBe(1);
   });
 
+  it("tells a user they already redeemed a single-use code instead of calling it used up", async () => {
+    const { codes } = await generateCodes(h.ctx, { label: "Once", audience: "judge", planKey: "complimentary", count: 1, maxRedemptions: 1 });
+    const { client } = await signup(h.app);
+    expect((await client.post("/api/access/redeem", { code: codes[0] })).statusCode).toBe(200);
+    const again = await client.post("/api/access/redeem", { code: codes[0] });
+    expect(again.statusCode).toBe(409);
+    expect(json(again).error.code).toBe("already_redeemed");
+    const other = await signup(h.app);
+    expect(json(await other.client.post("/api/access/redeem", { code: codes[0] })).error.code).toBe("code_exhausted");
+  });
+
   it("enforces the redemption limit atomically under concurrency", async () => {
     const { codes } = await generateCodes(h.ctx, { label: "Single", audience: "pilot", planKey: "complimentary", count: 1, maxRedemptions: 1 });
     const users = await Promise.all(Array.from({ length: 6 }, () => signup(h.app)));
