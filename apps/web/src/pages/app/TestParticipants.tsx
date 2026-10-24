@@ -123,7 +123,7 @@ export function describeEvent(e: {
     case "ff_form_submitted":
       return `Submitted a form${e.pagePath ? ` on ${e.pagePath}` : ""}`;
     case "ff_custom_event":
-      return describeCustomEvent(e.customName, e.details);
+      return describeCustomEvent(e.customName, e.details, e.pagePath);
     case "ff_client_error":
       return `Page error${e.pagePath ? ` on ${e.pagePath}` : ""}`;
     case "ff_goal_reached":
