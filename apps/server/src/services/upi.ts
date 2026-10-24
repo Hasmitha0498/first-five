@@ -113,8 +113,15 @@ export async function listPaymentsForAdmin(ctx: AppContext): Promise<AdminPaymen
     orderBy: { updatedAt: "desc" },
     take: 100,
   });
+  const failedIds = orders.filter((o) => o.status === "failed").map((o) => o.id);
+  const adminRejected = new Set(
+    failedIds.length
+      ? (await ctx.db.auditLog.findMany({ where: { action: "order.upi_rejected", resourceType: "order", resourceId: { in: failedIds } }, select: { resourceId: true } })).map((a) => a.resourceId)
+      : [],
+  );
   return orders.map((o) => ({
     orderId: o.id,
+    correctable: o.status === "failed" && adminRejected.has(o.id),
     reference: o.merchantReference,
     status: o.status,
     environment: o.environment,
@@ -126,14 +133,24 @@ export async function listPaymentsForAdmin(ctx: AppContext): Promise<AdminPaymen
   }));
 }
 
-/** Admin confirms the money arrived (after checking their UPI/bank app). Idempotent. */
+/** True when an admin (not the payment flow) rejected this UPI order, so it may be corrected. */
+async function rejectedByAdmin(ctx: AppContext, orderId: string): Promise<boolean> {
+  return (await ctx.db.auditLog.count({ where: { action: "order.upi_rejected", resourceType: "order", resourceId: orderId } })) > 0;
+}
+
+/**
+ * Admin confirms the money arrived (after checking their UPI/bank app). Idempotent.
+ * An order an admin rejected by mistake can still be confirmed; that correction is audited separately.
+ */
 export async function confirmUpiPayment(ctx: AppContext, adminId: string, orderId: string) {
   const order = await ctx.db.order.findUnique({ where: { id: orderId } });
   if (!order || order.provider !== UPI_PROVIDER) throw notFound("Order");
   if (order.status === "paid_verified") return grantPaidAccess(ctx, order.id);
-  if (!["checkout_ready", "pending_verification"].includes(order.status)) throw conflict("order_closed", "This order was already rejected.");
+  const correcting = order.status === "failed" && (await rejectedByAdmin(ctx, order.id));
+  if (!correcting && !["checkout_ready", "pending_verification"].includes(order.status)) throw conflict("order_closed", "This order was already rejected.");
+  const from: ("checkout_ready" | "pending_verification" | "failed")[] = correcting ? ["failed"] : ["checkout_ready", "pending_verification"];
   await ctx.db.$transaction(async (tx) => {
-    const res = await tx.order.updateMany({ where: { id: order.id, status: { in: ["checkout_ready", "pending_verification"] } }, data: { status: "paid_verified" } });
+    const res = await tx.order.updateMany({ where: { id: order.id, status: { in: from } }, data: { status: "paid_verified" } });
     if (res.count !== 1) throw conflict("state_changed", "This order changed. Refresh and try again.");
     const existing = await tx.payment.findFirst({ where: { orderId: order.id }, orderBy: { createdAt: "desc" } });
     if (existing) {
@@ -143,7 +160,14 @@ export async function confirmUpiPayment(ctx: AppContext, adminId: string, orderI
         data: { orderId: order.id, providerPaymentId: `upi-ref:${order.merchantReference}`, providerStatus: "confirmed_by_admin", verified: true, verifiedAt: new Date() },
       });
     }
-    await audit(tx, { actorUserId: adminId, actorType: "admin", action: "order.upi_confirmed", resourceType: "order", resourceId: order.id, metadata: { reference: order.merchantReference } });
+    await audit(tx, {
+      actorUserId: adminId,
+      actorType: "admin",
+      action: correcting ? "order.upi_confirmed_after_rejection" : "order.upi_confirmed",
+      resourceType: "order",
+      resourceId: order.id,
+      metadata: { reference: order.merchantReference, ...(correcting ? { previousStatus: "failed" } : {}) },
+    });
   });
   return grantPaidAccess(ctx, order.id);
 }

@@ -182,6 +182,20 @@ function PaymentsCard() {
                         </Button>
                       </>
                     )}
+                    {p.status === "failed" && p.correctable && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={act.isPending}
+                        onClick={() =>
+                          window.confirm(
+                            `This payment was rejected. Confirm you DID receive ${p.amountLabel} with reference ${p.reference}${p.utr ? ` / UTR ${p.utr}` : ""}? This grants one study credit to ${p.buyerEmail} and is recorded as a correction.`,
+                          ) && act.mutate({ id: p.orderId, action: "confirm" })
+                        }
+                      >
+                        Confirm received
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))}
