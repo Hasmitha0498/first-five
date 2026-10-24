@@ -48,7 +48,11 @@ Render deploys Blueprints from a Git repository.
 1. Push this repository to GitHub (private is fine; install the Render GitHub app for that repo).
 2. Render Dashboard → **New → Blueprint** → select the repo → review the two free resources → **Apply**.
 3. Wait for the first deploy, then open `https://<service>.onrender.com/readyz` — it should return `{"status":"ready","database":"ok"}`.
-4. Create your account on the site, then make yourself an admin from **Shell** in the Render dashboard:
+4. Create your account on the site, then make yourself an admin.
+
+   **Free plan (no Shell):** set an `ADMIN_BOOTSTRAP_TOKEN` environment variable (24+ random characters), redeploy, sign in, open `/admin-setup` and enter the token. It works only while no admin exists. Delete the variable afterwards.
+
+   **Paid plan:** from **Shell** in the Render dashboard:
    ```bash
    npm run admin:grant-admin -- --email you@example.com
    ```
@@ -62,6 +66,9 @@ If you prefer the API/CLI, keep the key in your shell, never in files or chat:
 ```bash
 export RENDER_API_KEY=…   # in your terminal only
 ```
+
+### Deploys
+The service was created from the public repo URL without Render's GitHub app, so **pushes don't auto-deploy**. Trigger a deploy from the dashboard (**Manual Deploy → Deploy latest commit**) or install the Render GitHub app to enable auto-deploy.
 
 ## Smoke test after deploy
 Read-only (creates no accounts, so production activity numbers stay genuine):
