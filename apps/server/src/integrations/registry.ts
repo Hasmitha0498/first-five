@@ -41,7 +41,7 @@ const META: Record<ProviderKey, { name: string; description: string; keys: (keyo
   agenticorg: {
     name: "AgenticOrg — UX Director",
     description: "Contextual interview questions, research findings and human-approved publishing.",
-    keys: ["AGENTICORG_BASE_URL", "AGENTICORG_API_KEY", "AGENTICORG_WORKFLOW_ID"],
+    keys: ["AGENTICORG_BASE_URL", "AGENTICORG_API_KEY", "AGENTICORG_Q2_AGENT_ID", "AGENTICORG_REPORT_AGENT_ID"],
   },
   pinelabs: {
     name: "Pine Labs",

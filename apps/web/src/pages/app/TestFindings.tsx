@@ -34,7 +34,9 @@ export function TestFindingsPage() {
             <div className="flex items-center gap-2 font-medium">
               <Sparkles className="h-4 w-4 text-accent" aria-hidden /> UX Director
             </div>
-            <p className="mt-1 text-sm text-ink-muted">AI findings aren't available yet. Research findings become available when the UX Director is connected.</p>
+            <p className="mt-1 text-sm text-ink-muted">
+              Analyzes your finished attempts with the AgenticOrg UX Director. A person approves the draft in AgenticOrg before it can be published.
+            </p>
             <Button className="mt-3" variant="secondary" loading={analyze.isPending} onClick={() => analyze.mutate()}>
               Run analysis
             </Button>

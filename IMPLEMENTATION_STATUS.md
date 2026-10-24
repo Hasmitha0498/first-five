@@ -18,10 +18,10 @@ Landing page and access system details: [LANDING_PAGE_IMPLEMENTATION_STATUS.md](
 | Cross-domain launch tickets → SDK credentials | Yes | Contract tests | SDK pending | `/api/sdk/exchange` | Fragment handoff untested with real SPAs | Test on Demo A |
 | Event ingestion (validation, sanitization, dedupe, rate limits) | Yes | Contract tests | SDK pending | `/api/sdk/events` | — | — |
 | Session engine (goal verification, deadlines, invalid, concurrency) | Yes | Yes | n/a | `services/sessions.ts`, `services/sdk.ts` | In-process scheduler pauses while a free instance sleeps (on-demand reconciliation covers correctness) | Optional paid cron for `admin:sweep` |
-| Post-task interview (Q1, fallback Q2, Q3) | Yes | Yes | AgenticOrg pending for contextual Q2 | `/t/:id/feedback` | — | — |
+| Post-task interview (Q1, contextual/fallback Q2, Q3) | Yes | Yes | AgenticOrg contextual Q2 (falls back after 8 s) | `/t/:id/feedback` | — | — |
 | Dashboard metrics, participant list, session timeline | Yes | Yes | PostHog pending | `/app/tests/:id` | Local analytics only | Connect PostHog |
 | Reports: owner-written findings, evidence validation, review, publish | Yes | Yes | n/a | `/app/reports/:id`, `/r/:token` | — | — |
-| UX Director analysis | Interface only | Unit (no fabrication) | **Not configured** | `integrations/agenticorg.ts` | Returns 503 "AI findings aren't available yet" | "Connect AgenticOrg" |
+| UX Director analysis (AgenticOrg) | Yes — live connector: contextual Q2, background report run, output validation, HITL approval sync, publish confirmation | Unit (adapter, parser, validator) + live end-to-end run 24 Oct 2026 | **Connected locally**; needs Render env vars + `AGENTICORG_APPROVALS_API_KEY` to publish | `integrations/agenticorg.ts`, `services/evidence.ts`, `services/reports.ts` | Approvals can't be read without an approvals:read key; tenant HITL-condition bug queues approvals for Q2 runs | Set env vars on Render; get approvals key from organisers |
 | PostHog delivery/query | Adapter implemented | Unit (mapping, capture) | **Not configured** | `integrations/posthog.ts` | Never tested against live PostHog | "Connect PostHog" |
 | Pine Labs checkout | Interface + order model | Integration (gating, verified-only grants) | **Not configured**; `PAYMENTS_ENABLED=false` | `integrations/pinelabs.ts` | No live calls implemented | "Connect Pine Labs" (UAT) |
 | Admin: integrations, codes, real activity & funnel | Yes | Partly (API) | n/a | `/app/admin` | — | Grant yourself admin after deploy |
