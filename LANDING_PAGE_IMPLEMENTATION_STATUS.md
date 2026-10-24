@@ -1,6 +1,6 @@
 # Landing Page & Access System — Implementation Status
 
-Verified locally on 24 Oct 2026 (production build + embedded PostgreSQL 17, headless Google Chrome). **Not deployed to Render yet** (awaiting approval).
+Verified locally on 24 Oct 2026 (production build + embedded PostgreSQL 17, headless Google Chrome). **Deployed:** https://first-five.onrender.com — read-only smoke test 9/9 passed.
 Screenshots: [`qa/screenshots/`](qa/screenshots/). Design reference: [`references/landing/`](references/landing/).
 
 | Requirement | Implementation | Tests | Blockers / notes | Files / routes |
@@ -32,7 +32,7 @@ Screenshots: [`qa/screenshots/`](qa/screenshots/). Design reference: [`reference
 | Accessibility | Semantic headings, labeled inputs, keyboard FAQ (`<details>`), focus rings, reduced motion, AA contrast (all small text ≥ 4.5:1 after fixes) | e2e keyboard FAQ ✓; contrast computed | No screen-reader audit with real AT | — |
 | Performance | Self-hosted Inter (CSP-safe), no third-party scripts; JS 130 KB gzip | — | Single bundle (no route splitting) | — |
 | SDK boundary | Untouched: no SDK code; contracts unchanged | contract tests ✓ | — | `packages/sdk-contract` |
-| Render deployment | `render.yaml` updated (`PAYMENTS_ENABLED=false`) | — | **Awaiting your approval** + a Git repo Render can read | `render.yaml` |
+| Render deployment | Live at https://first-five.onrender.com, `PAYMENTS_ENABLED=false` | `scripts/smoke.sh` 9/9 ✓ | Free plan: sleeps after 15 min idle; DB expires 23 Nov 2026 | `render.yaml` |
 
 ## Test results (actual runs)
 

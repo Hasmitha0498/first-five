@@ -1,6 +1,6 @@
 # First Five — Implementation Status
 
-As of 24 Oct 2026. "Tested" means an automated test that actually ran and passed (unit 34, integration/contract 49, browser 9). Nothing is deployed yet.
+As of 24 Oct 2026. "Tested" means an automated test that actually ran and passed (unit 34, integration/contract 49, browser 9). Deployed to https://first-five.onrender.com on 24 Oct 2026 (read-only smoke test 9/9 passed).
 Landing page and access system details: [LANDING_PAGE_IMPLEMENTATION_STATUS.md](LANDING_PAGE_IMPLEMENTATION_STATUS.md). Integrations: [INTEGRATION_CHECKLIST.md](INTEGRATION_CHECKLIST.md).
 
 | Feature | Implemented | Tested | Connected | Where | Known limitations | Next action |
@@ -26,4 +26,4 @@ Landing page and access system details: [LANDING_PAGE_IMPLEMENTATION_STATUS.md](
 | Pine Labs checkout | Interface + order model | Integration (gating, verified-only grants) | **Not configured**; `PAYMENTS_ENABLED=false` | `integrations/pinelabs.ts` | No live calls implemented | "Connect Pine Labs" (UAT) |
 | Admin: integrations, codes, real activity & funnel | Yes | Partly (API) | n/a | `/app/admin` | — | Grant yourself admin after deploy |
 | Landing page + access funnel | Yes | Yes | n/a | `/`, `/access`, `/waitlist`, `/redeem`, `/checkout`, `/payment/status` | Privacy/Terms are drafts needing legal review | Legal review |
-| Render deployment config | Yes | Smoke script only | **Not deployed** | `render.yaml`, `scripts/smoke.sh` | Free plan: sleeps after 15 min; DB expires after 30 days | Approve deploy |
+| Render deployment | Yes | Smoke test 9/9 on live URL | **Live** at https://first-five.onrender.com | `render.yaml`, `scripts/smoke.sh` | Free plan: sleeps after 15 min; DB expires 23 Nov 2026 | Grant yourself admin; generate judge codes |

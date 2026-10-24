@@ -16,7 +16,9 @@ check "healthz"        "$BASE/healthz"              '"status":"ok"'
 check "readyz (db)"    "$BASE/readyz"               '"database":"ok"'
 check "landing page"   "$BASE/"                     '<div id="root">'
 check "sample report"  "$BASE/sample-report"        '<div id="root">'
-check "plans API"      "$BASE/api/billing/plans"    '"free_pilot"'
+check "waitlist page"  "$BASE/waitlist"             '<div id="root">'
+check "access page"    "$BASE/access"               '<div id="root">'
+check "offer API"      "$BASE/api/billing/offer"    '"checkoutAvailable":false'
 code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/projects"); [[ "$code" == 401 ]] && echo "PASS auth required" || { echo "FAIL auth required ($code)"; fail=1; }
 hdr=$(curl -sI "$BASE/" | tr -d '\r'); grep -qi '^content-security-policy:' <<<"$hdr" && echo "PASS CSP header" || { echo "FAIL CSP header"; fail=1; }
 exit $fail
