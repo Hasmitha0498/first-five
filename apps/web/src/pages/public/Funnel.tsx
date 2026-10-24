@@ -4,7 +4,7 @@ import { ArrowRight, Check, CheckCircle2, Clock, KeyRound, Lock, XCircle } from 
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { MarketingFooter, MarketingHeader } from "../../components/layouts";
-import { Alert, Button, Field, Input, Spinner, buttonClass } from "../../components/ui";
+import { Alert, Button, CopyButton, Field, Input, Spinner, buttonClass } from "../../components/ui";
 import { api, ApiError, errorMessage, fieldErrors, post } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { getUtm, track } from "../../lib/track";
@@ -219,9 +219,14 @@ export function AccessPage() {
             </Link>
           </>
         ) : (
-          <Link to={checkoutTarget} className={buttonClass("primary", "lg", "mt-5 w-full")}>
-            Continue with ₹99 access <ArrowRight className="h-4 w-4" aria-hidden />
-          </Link>
+          <>
+            <Link to={checkoutTarget} className={buttonClass("primary", "lg", "mt-5 w-full")}>
+              Continue with ₹99 access <ArrowRight className="h-4 w-4" aria-hidden />
+            </Link>
+            {o?.paymentMethod === "upi_manual" && (
+              <p className="mt-3 text-center text-[12px] leading-relaxed text-ink-muted">Pay by UPI. We confirm each payment by hand, usually within a few hours.</p>
+            )}
+          </>
         )}
 
         <div className="my-5 h-px bg-[#E2EBE5]" />
@@ -345,11 +350,13 @@ export function RedeemPage() {
 export function CheckoutPage() {
   const { me, loading } = useAuth();
   const offer = useOffer();
+  const navigate = useNavigate();
   const start = useMutation({
     mutationFn: () => post<{ orderId: string; redirectUrl: string }>("/api/payments/checkout", { planKey: "single_study" }),
     onSuccess: (r) => {
+      if (offer.data?.paymentMethod === "upi_manual") navigate(`/payment/status?order=${r.orderId}`);
       // Hosted checkout on the provider's domain. Access is granted only after server-side verification.
-      window.location.assign(r.redirectUrl);
+      else window.location.assign(r.redirectUrl);
     },
   });
   if (loading) return <FunnelShell><Spinner /></FunnelShell>;
@@ -383,7 +390,10 @@ export function CheckoutPage() {
               <span className="text-[20px] font-extrabold">{o.priceLabel}</span>
             </div>
             <p className="mt-3 text-[13px] text-ink-muted">
-              One-time payment · No recurring charges. Total charged: {o.priceLabel}. You'll pay on Pine Labs' secure page; card details never reach First Five.
+              One-time payment · No recurring charges. Total: {o.priceLabel}.{" "}
+              {o.paymentMethod === "upi_manual"
+                ? "You'll pay by UPI from any UPI app. We confirm each payment by hand — your study credit appears once it's confirmed, usually within a few hours."
+                : "You'll pay on Pine Labs' secure page; card details never reach First Five."}
             </p>
             {o.environment === "uat" && (
               <Alert tone="warning" className="mt-3">
@@ -396,7 +406,7 @@ export function CheckoutPage() {
               </Alert>
             )}
             <Button size="lg" className="mt-5 w-full" icon={Lock} loading={start.isPending} onClick={() => start.mutate()}>
-              Continue to secure checkout
+              {o.paymentMethod === "upi_manual" ? `Pay ${o.priceLabel} with UPI` : "Continue to secure checkout"}
             </Button>
           </>
         )}
@@ -418,7 +428,13 @@ export function PaymentStatusPage() {
     queryKey: ["order", orderId],
     queryFn: () => api<OrderStatusDto>(`/api/payments/orders/${orderId}`),
     enabled: Boolean(me && orderId && /^[0-9a-f-]{36}$/.test(orderId)),
-    refetchInterval: (query) => (query.state.data && PENDING.has(query.state.data.status) && Date.now() - started.current < 180_000 ? 4000 : false),
+    refetchInterval: (query) => {
+      const d = query.state.data;
+      if (!d || !PENDING.has(d.status)) return false;
+      // UPI is confirmed by a person: check occasionally, without a time limit.
+      if (d.method === "upi_manual") return d.status === "pending_verification" ? 30_000 : false;
+      return Date.now() - started.current < 180_000 ? 4000 : false;
+    },
   });
   useEffect(() => {
     if (q.data?.status === "paid_verified") void refresh();
@@ -449,6 +465,31 @@ export function PaymentStatusPage() {
         <Link to="/app/websites" className={buttonClass("primary", "lg", "mt-5 w-full")}>
           Go to your workspace
         </Link>
+      </>
+    );
+  } else if (q.data?.method === "upi_manual" && s === "checkout_ready" && q.data.upi) {
+    body = <UpiPayPanel order={q.data} onSubmitted={() => q.refetch()} />;
+  } else if (q.data?.method === "upi_manual" && PENDING.has(s)) {
+    body = (
+      <>
+        <Clock className="h-10 w-10 text-warning" aria-hidden />
+        <h1 className="mt-4 text-[22px] font-extrabold">We're confirming your payment</h1>
+        <p className="mt-2 text-[14px] leading-[1.65] text-[#5F7169]">
+          We check every UPI payment by hand, usually within a few hours. Your study credit will appear here and in Settings as soon as it's confirmed. You
+          can safely close this page.
+        </p>
+        <dl className="mt-4 space-y-1 rounded-[11px] border border-line bg-canvas p-4 text-[13px]">
+          <div className="flex justify-between gap-3">
+            <dt className="text-ink-muted">Reference</dt>
+            <dd className="font-mono font-semibold">{q.data.reference}</dd>
+          </div>
+          {q.data.submittedUtr && (
+            <div className="flex justify-between gap-3">
+              <dt className="text-ink-muted">UPI transaction ID</dt>
+              <dd className="font-mono">{q.data.submittedUtr}</dd>
+            </div>
+          )}
+        </dl>
       </>
     );
   } else if (PENDING.has(s)) {
@@ -501,6 +542,86 @@ export function PaymentStatusPage() {
   );
 }
 
+/* UPI payment (manual confirmation) -------------------------------------------------------- */
+
+function UpiPayPanel({ order, onSubmitted }: { order: OrderStatusDto; onSubmitted: () => void }) {
+  const upi = order.upi!;
+  const [qr, setQr] = useState<string | null>(null);
+  const [utr, setUtr] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    import("qrcode")
+      .then((QR) => QR.toDataURL(upi.uri, { margin: 1, width: 220, color: { dark: "#142B31", light: "#FFFFFF" } }))
+      .then((url) => !cancelled && setQr(url))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [upi.uri]);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await post(`/api/payments/orders/${order.id}/upi-reference`, { utr: utr.replace(/\s/g, "") });
+      onSubmitted();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <>
+      <Kicker>Pay by UPI</Kicker>
+      <h1 className="mb-1 mt-2 text-[24px] font-extrabold tracking-[-0.8px]">Pay {upi.amountLabel} to get one study</h1>
+      <p className="text-[14px] leading-[1.65] text-[#5F7169]">Scan with any UPI app, or tap the button on your phone. Please keep the note as shown so we can match your payment.</p>
+      <div className="mt-5 flex flex-col items-center gap-4 rounded-[13px] border border-line bg-canvas p-5 sm:flex-row sm:items-start">
+        <div className="flex h-[180px] w-[180px] flex-none items-center justify-center rounded-lg bg-white p-2">
+          {qr ? <img src={qr} alt={`UPI QR code to pay ${upi.amountLabel} to ${upi.payeeVpa}`} className="h-full w-full" /> : <Spinner label="Preparing QR" />}
+        </div>
+        <dl className="w-full space-y-2.5 text-[13px]">
+          <div>
+            <dt className="text-ink-muted">Pay to</dt>
+            <dd className="flex flex-wrap items-center gap-2">
+              <span className="break-all font-mono font-semibold">{upi.payeeVpa}</span> <CopyButton text={upi.payeeVpa} label="Copy" />
+            </dd>
+          </div>
+          <div>
+            <dt className="text-ink-muted">Amount</dt>
+            <dd className="font-semibold">{upi.amountLabel}</dd>
+          </div>
+          <div>
+            <dt className="text-ink-muted">Note / reference</dt>
+            <dd className="flex flex-wrap items-center gap-2">
+              <span className="font-mono font-semibold">{upi.reference}</span> <CopyButton text={upi.reference} label="Copy" />
+            </dd>
+          </div>
+        </dl>
+      </div>
+      <a href={upi.uri} className={buttonClass("primary", "lg", "mt-4 w-full sm:hidden")}>
+        Open UPI app
+      </a>
+      <form onSubmit={submit} className="mt-6 space-y-3 border-t border-line pt-5" noValidate>
+        <h2 className="text-[15px] font-bold">Paid? Tell us your UPI transaction ID</h2>
+        <p className="text-[13px] text-ink-muted">Find the 12-digit UTR / UPI reference number in your UPI app's payment details.</p>
+        {error && <Alert tone="danger">{error}</Alert>}
+        <Field label="UPI transaction ID (UTR)">
+          {(p) => <Input {...p} inputMode="numeric" autoComplete="off" maxLength={14} placeholder="12 digits" className="font-mono tracking-wider" value={utr} onChange={(e) => setUtr(e.target.value)} />}
+        </Field>
+        <Button type="submit" size="lg" className="w-full" loading={submitting} disabled={utr.replace(/\s/g, "").length < 12}>
+          I've paid — submit
+        </Button>
+        <p className="text-[12px] text-ink-muted">Your study credit is added only after we confirm the payment arrived. Don't pay twice — if something went wrong, contact the First Five team with your reference.</p>
+      </form>
+    </>
+  );
+}
+
 /* Legal drafts ---------------------------------------------------------------------------- */
 
 function LegalDraft({ title, children }: { title: string; children: ReactNode }) {
@@ -543,7 +664,10 @@ export function PrivacyPage() {
       <h2>How we use it</h2>
       <p>To run the product, contact waitlist members about access, keep accounts secure, and measure whether the product is working. We don't sell personal data.</p>
       <h2>Payments</h2>
-      <p>Payments are handled on Pine Labs' hosted checkout. First Five never receives card details.</p>
+      <p>
+        You pay by UPI from your own UPI app directly to First Five's UPI ID. We never see your bank or card details. We store the order, the payment
+        reference and the UPI transaction ID you give us so we can confirm the payment.
+      </p>
       <h2>Your choices</h2>
       <p>Participants can skip any question and withdraw during a test, which deletes their recorded activity. To delete an account or waitlist entry, contact the First Five team.</p>
     </LegalDraft>

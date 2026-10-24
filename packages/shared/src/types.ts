@@ -394,8 +394,21 @@ export interface PaidOffer {
   maxParticipantsPerStudy: number;
   /** True only when checkout is explicitly enabled AND the provider is implemented and configured. */
   checkoutAvailable: boolean;
+  /** "upi_manual": pay by UPI, confirmed by the First Five team. "pinelabs": hosted checkout. */
+  paymentMethod: "upi_manual" | "pinelabs" | null;
   environment: "uat" | "live";
   unavailableReason: string | null;
+}
+
+export interface UpiPaymentInstructions {
+  payeeVpa: string;
+  payeeName: string;
+  amount: string;
+  amountLabel: string;
+  /** Unique reference the payer adds to the UPI note. */
+  reference: string;
+  /** upi://pay deep link for mobile UPI apps. */
+  uri: string;
 }
 
 export interface OrderStatusDto {
@@ -404,6 +417,24 @@ export interface OrderStatusDto {
   environment: "uat" | "live";
   amountLabel: string;
   planName: string;
+  method: "upi_manual" | "pinelabs";
+  reference: string;
+  /** Present while the buyer still needs to pay (UPI). */
+  upi: UpiPaymentInstructions | null;
+  /** The UPI transaction ID the buyer submitted, if any. */
+  submittedUtr: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminPaymentDto {
+  orderId: string;
+  reference: string;
+  status: OrderStatusDto["status"];
+  environment: "uat" | "live";
+  amountLabel: string;
+  buyerEmail: string;
+  utr: string | null;
   createdAt: string;
   updatedAt: string;
 }

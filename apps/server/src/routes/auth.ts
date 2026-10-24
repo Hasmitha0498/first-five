@@ -10,6 +10,7 @@ import { checkCode, redeemCode } from "../services/access-codes";
 import { createAuthSession, destroyAuthSession, login, SESSION_COOKIE, signup } from "../services/auth";
 import { getEntitlement } from "../services/entitlements";
 import { createCheckout, getOrderStatus, paidOffer } from "../services/payments";
+import { submitUtr } from "../services/upi";
 
 export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
   const setSessionCookie = (reply: import("fastify").FastifyReply, token: string, expiresAt: Date) =>
@@ -125,6 +126,16 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
     const { planKey } = z.object({ planKey: z.string().default("single_study") }).parse(req.body ?? {});
     return createCheckout(ctx, userId(req), planKey);
   });
+
+  app.post(
+    "/api/payments/orders/:id/upi-reference",
+    { preHandler: requireUser, config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } },
+    async (req) => {
+      const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+      await submitUtr(ctx, userId(req), id, req.body);
+      return getOrderStatus(ctx, userId(req), id);
+    },
+  );
 
   app.get("/api/payments/orders/:id", { preHandler: requireUser }, async (req) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);

@@ -13,6 +13,7 @@ import { ProviderUnavailableError } from "../integrations/agenticorg";
 import type { VerifiedOrderStatus } from "../integrations/pinelabs";
 import { getPlan } from "../plans";
 import { recordActivationIfFirst, recordConversion } from "./conversions";
+import { createUpiCheckout, UPI_PROVIDER, upiInstructions } from "./upi";
 
 const PAID_PLAN = "single_study";
 
@@ -25,15 +26,17 @@ export function priceLabel(amountMinor: number, currency: string): string {
 }
 
 /**
- * Checkout opens only when it is EXPLICITLY enabled (PAYMENTS_ENABLED=true)
- * and the Pine Labs adapter is both configured and implemented. Entering
- * credentials alone never opens checkout.
+ * Checkout opens only when it is EXPLICITLY enabled (PAYMENTS_ENABLED=true) AND a
+ * payment method is ready: direct UPI (UPI_PAYEE_VPA, manually confirmed) or the
+ * Pine Labs adapter (configured and implemented). Entering credentials alone never opens checkout.
  */
-export function checkoutAvailability(ctx: AppContext): { available: boolean; reason: string | null } {
+export function checkoutAvailability(ctx: AppContext): { available: boolean; reason: string | null; method: "upi_manual" | "pinelabs" | null } {
+  const unavailable = { available: false, reason: "Paid access isn't available yet.", method: null };
+  if (!ctx.config.PAYMENTS_ENABLED) return unavailable;
+  if (ctx.config.UPI_PAYEE_VPA) return { available: true, reason: null, method: "upi_manual" };
   const p = ctx.providers.payments;
-  if (!ctx.config.PAYMENTS_ENABLED) return { available: false, reason: "Paid access isn't available yet." };
-  if (!p.configured || !p.implemented) return { available: false, reason: "Paid access isn't available yet." };
-  return { available: true, reason: null };
+  if (p.configured && p.implemented) return { available: true, reason: null, method: "pinelabs" };
+  return unavailable;
 }
 
 export function paidOffer(ctx: AppContext): PaidOffer {
@@ -48,7 +51,9 @@ export function paidOffer(ctx: AppContext): PaidOffer {
     studyCredits: plan.studyCredits,
     maxParticipantsPerStudy: plan.maxParticipantsPerStudy,
     checkoutAvailable: a.available,
-    environment: ctx.providers.payments.environment,
+    paymentMethod: a.method,
+    // Direct UPI payments are real money.
+    environment: a.method === "upi_manual" ? "live" : ctx.providers.payments.environment,
     unavailableReason: a.reason,
   };
 }
@@ -57,6 +62,7 @@ export async function createCheckout(ctx: AppContext, userId: string, planKey: s
   if (planKey !== PAID_PLAN) throw new AppError(400, "invalid_request", "Unknown plan.");
   const a = checkoutAvailability(ctx);
   if (!a.available) throw new AppError(503, "payment_unavailable", a.reason!);
+  if (a.method === "upi_manual") return createUpiCheckout(ctx, userId, planKey);
   const provider = ctx.providers.payments;
   const order = await ctx.db.order.create({
     data: {
@@ -90,14 +96,20 @@ export async function createCheckout(ctx: AppContext, userId: string, planKey: s
 }
 
 export async function getOrderStatus(ctx: AppContext, userId: string, orderId: string): Promise<OrderStatusDto> {
-  const order = await ctx.db.order.findFirst({ where: { id: orderId, userId } });
+  const order = await ctx.db.order.findFirst({ where: { id: orderId, userId }, include: { payments: { orderBy: { createdAt: "desc" }, take: 1 } } });
   if (!order) throw notFound("Order");
+  const isUpi = order.provider === UPI_PROVIDER;
+  const utr = isUpi && order.payments[0]?.providerPaymentId ? order.payments[0].providerPaymentId.replace(/^upi:/, "") : null;
   return {
     id: order.id,
     status: order.status,
     environment: order.environment,
     amountLabel: priceLabel(order.amountMinor, order.currency),
     planName: getPlan(ctx.config, order.planKey).name,
+    method: isUpi ? "upi_manual" : "pinelabs",
+    reference: order.merchantReference,
+    upi: isUpi && order.status === "checkout_ready" && ctx.config.UPI_PAYEE_VPA ? upiInstructions(ctx, order) : null,
+    submittedUtr: utr,
     createdAt: order.createdAt.toISOString(),
     updatedAt: order.updatedAt.toISOString(),
   };

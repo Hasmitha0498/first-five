@@ -7,6 +7,7 @@ import { listProviderStatuses, PROVIDER_KEYS, verifyProvider } from "../integrat
 import { disableCode, generateCodes, toCodeDto } from "../services/access-codes";
 import { audit } from "../lib/audit";
 import { runMaintenance } from "../services/maintenance";
+import { confirmUpiPayment, listPaymentsForAdmin, rejectUpiPayment } from "../services/upi";
 
 /** Internal admin API. Non-admins receive 404 so the surface isn't advertised. */
 export async function adminRoutes(app: FastifyInstance, ctx: AppContext) {
@@ -35,6 +36,20 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext) {
   app.post("/api/admin/codes/:id/disable", async (req) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     return disableCode(ctx, userId(req), id);
+  });
+
+  app.get("/api/admin/payments", async () => ({ payments: await listPaymentsForAdmin(ctx) }));
+
+  app.post("/api/admin/payments/:id/confirm", async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    await confirmUpiPayment(ctx, userId(req), id);
+    return { payments: await listPaymentsForAdmin(ctx) };
+  });
+
+  app.post("/api/admin/payments/:id/reject", async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    await rejectUpiPayment(ctx, userId(req), id);
+    return { payments: await listPaymentsForAdmin(ctx) };
   });
 
   app.post("/api/admin/maintenance", async () => runMaintenance(ctx));

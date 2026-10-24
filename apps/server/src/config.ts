@@ -42,6 +42,16 @@ const EnvSchema = z.object({
   PAID_PARTICIPANT_CAP: int(5),
   /** Live/sandbox checkout opens ONLY when this is true AND Pine Labs is implemented + configured. */
   PAYMENTS_ENABLED: bool,
+  /**
+   * Direct UPI payments to this ID (e.g. name@bank). Payments are confirmed MANUALLY by an admin
+   * after checking the UPI app; no credit is granted before that.
+   */
+  UPI_PAYEE_VPA: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim() !== "" ? v.trim() : undefined))
+    .refine((v) => v === undefined || /^[a-zA-Z0-9._-]{2,256}@[a-zA-Z][a-zA-Z0-9.-]{1,64}$/.test(v), "UPI_PAYEE_VPA must look like name@bank"),
+  UPI_PAYEE_NAME: z.string().default("First Five"),
   DEFAULT_CODE_STUDY_CREDITS: int(1),
   DEFAULT_CODE_PARTICIPANT_CAP: int(5),
   /** Unlaunched draft studies an entitled account may hold at once. */

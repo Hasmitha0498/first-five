@@ -1,4 +1,4 @@
-import type { InvitationCodeDto, ProviderStatusDto } from "@firstfive/shared";
+import type { AdminPaymentDto, InvitationCodeDto, ProviderStatusDto } from "@firstfive/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, RefreshCw } from "lucide-react";
 import { useState, type FormEvent } from "react";
@@ -37,6 +37,7 @@ export function AdminPage() {
     <div className="space-y-8">
       <PageHeader title="Internal admin" description="Visible only to First Five operators. Credentials are never shown here." />
       <OverviewCard />
+      <PaymentsCard />
       <IntegrationsCard />
       <CodesCard />
     </div>
@@ -110,6 +111,85 @@ function OverviewCard() {
         </div>
       </Card>
     </>
+  );
+}
+
+function PaymentsCard() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["admin-payments"], queryFn: () => api<{ payments: AdminPaymentDto[] }>("/api/admin/payments"), refetchInterval: 60_000 });
+  const act = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: "confirm" | "reject" }) => post<{ payments: AdminPaymentDto[] }>(`/api/admin/payments/${id}/${action}`),
+    onSuccess: (r) => {
+      qc.setQueryData(["admin-payments"], r);
+      qc.invalidateQueries({ queryKey: ["admin-overview"] });
+    },
+  });
+  const pending = (q.data?.payments ?? []).filter((p) => p.status === "pending_verification" || p.status === "checkout_ready");
+  const done = (q.data?.payments ?? []).filter((p) => p.status === "paid_verified" || p.status === "failed");
+  const STATUS: Record<string, string> = { checkout_ready: "Not yet submitted", pending_verification: "Awaiting your check", paid_verified: "Confirmed", failed: "Rejected" };
+  return (
+    <Card>
+      <CardHeader
+        title="UPI payments"
+        description="Confirm only after you see the payment in your UPI or bank app — match the amount and the reference (in the note) or the UPI transaction ID. Confirming grants one study credit."
+      />
+      {q.isLoading && <Spinner />}
+      {q.error && <p className="p-5 text-sm text-danger">{errorMessage(q.error)}</p>}
+      {act.error && (
+        <Alert tone="danger" className="m-5">
+          {errorMessage(act.error)}
+        </Alert>
+      )}
+      {q.data && q.data.payments.length === 0 && <p className="p-5 text-sm text-ink-muted sm:px-6">No UPI orders yet.</p>}
+      {[...pending, ...done].length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-left text-sm">
+            <thead className="bg-canvas text-xs uppercase tracking-wide text-ink-muted">
+              <tr>
+                <th className="px-5 py-2 font-medium">Reference</th>
+                <th className="px-3 py-2 font-medium">Buyer</th>
+                <th className="px-3 py-2 font-medium">Amount</th>
+                <th className="px-3 py-2 font-medium">UTR</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {[...pending, ...done].map((p) => (
+                <tr key={p.orderId}>
+                  <td className="px-5 py-2 font-mono">{p.reference}</td>
+                  <td className="px-3 py-2">{p.buyerEmail}</td>
+                  <td className="px-3 py-2">{p.amountLabel}</td>
+                  <td className="px-3 py-2 font-mono">{p.utr ?? "—"}</td>
+                  <td className="px-3 py-2">
+                    <Pill tone={p.status === "paid_verified" ? "success" : p.status === "failed" ? "neutral" : "warning"}>{STATUS[p.status] ?? p.status}</Pill>
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-right">
+                    {(p.status === "pending_verification" || p.status === "checkout_ready") && (
+                      <>
+                        <Button
+                          size="sm"
+                          disabled={act.isPending}
+                          onClick={() =>
+                            window.confirm(`Confirm you received ${p.amountLabel} with reference ${p.reference}${p.utr ? ` / UTR ${p.utr}` : ""}? This grants one study credit to ${p.buyerEmail}.`) &&
+                            act.mutate({ id: p.orderId, action: "confirm" })
+                          }
+                        >
+                          Confirm received
+                        </Button>
+                        <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => window.confirm("Reject this payment? No credit will be granted.") && act.mutate({ id: p.orderId, action: "reject" })}>
+                          Reject
+                        </Button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
   );
 }
 
