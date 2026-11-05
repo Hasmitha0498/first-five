@@ -101,9 +101,10 @@ const EnvSchema = z.object({
   PINELABS_WEBHOOK_SECRET: optionalString,
 });
 
-export const UX_DIRECTOR_DEFAULT_MODEL = { anthropic: "claude-opus-5-5", gemini: "gemini-3.8-flash" } as const;
+/** Claude defaults to Sonnet for every step (half Opus's price); set UX_DIRECTOR_MODEL_* to move a step to Opus or Haiku. */
+export const UX_DIRECTOR_DEFAULT_MODEL = { anthropic: "claude-sonnet-5-5", gemini: "gemini-3.8-flash" } as const;
 /** Gemini scoring defaults to Pro: the rubric judgments are the quality gate, and Pro is the stronger judge. */
-export const UX_DIRECTOR_DEFAULT_SCORE_MODEL = { anthropic: "claude-opus-5-5", gemini: "gemini-3.1-pro-preview" } as const;
+export const UX_DIRECTOR_DEFAULT_SCORE_MODEL = { anthropic: "claude-sonnet-5-5", gemini: "gemini-3.1-pro-preview" } as const;
 
 type UxDirectorModelKey = "UX_DIRECTOR_MODEL_Q2" | "UX_DIRECTOR_MODEL_MAP" | "UX_DIRECTOR_MODEL_REDUCE" | "UX_DIRECTOR_MODEL_SCORE";
 

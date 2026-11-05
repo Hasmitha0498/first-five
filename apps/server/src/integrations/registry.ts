@@ -40,7 +40,7 @@ const META: Record<ProviderKey, { name: string; description: string; keys: (keyo
   },
   ux_director: {
     name: "UX Director (First Five)",
-    description: "Contextual interview questions and rubric-scored research findings, using Claude models (or Gemini).",
+    description: "Contextual interview questions and rubric-scored research findings, using Claude Sonnet 5.5 by default (or Gemini).",
     keys: ["ANTHROPIC_API_KEY"],
   },
   pinelabs: {

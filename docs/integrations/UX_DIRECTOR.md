@@ -11,10 +11,10 @@ It replaced the AgenticOrg integration. Reports produced by AgenticOrg are kept 
 | `UX_DIRECTOR_PROVIDER` | `anthropic` | `anthropic` or `gemini` |
 | `ANTHROPIC_API_KEY` | — (secret) | Enables the UX Director when the provider is `anthropic`. When the selected provider's key is unset, interviews use the standard Q2 and **Run analysis** returns 503. |
 | `GEMINI_API_KEY` | — (secret) | The same, when the provider is `gemini` |
-| `UX_DIRECTOR_MODEL_Q2` | provider default | Model for the contextual question. Defaults: `claude-opus-5-5` / `gemini-3.8-flash` |
+| `UX_DIRECTOR_MODEL_Q2` | provider default | Model for the contextual question. Defaults: `claude-sonnet-5-5` / `gemini-3.8-flash` |
 | `UX_DIRECTOR_MODEL_MAP` | provider default | Model for per-attempt analysis |
 | `UX_DIRECTOR_MODEL_REDUCE` | provider default | Model for the cross-attempt synthesis |
-| `UX_DIRECTOR_MODEL_SCORE` | provider default | Model for the rubric judgments. Defaults: `claude-opus-5-5` / `gemini-3.1-pro-preview` |
+| `UX_DIRECTOR_MODEL_SCORE` | provider default | Model for the rubric judgments. Defaults: `claude-sonnet-5-5` / `gemini-3.1-pro-preview` |
 | `UX_DIRECTOR_Q2_TIMEOUT_MS` | `8000` | How long the interview waits for Q2 before showing the fallback question |
 | `UX_DIRECTOR_RUN_BUDGET_MS` | `600000` | An analysis that hasn't finished in this time fails with a "run it again" message |
 | `UX_DIRECTOR_FINDING_THRESHOLD` | `60` | Findings scoring below this (0–100) are dropped, together with their recommendation |
@@ -30,11 +30,11 @@ To set it up on Render: add `ANTHROPIC_API_KEY` under **Environment**, deploy, t
 
 Two differences matter:
 - Gemini has no server-side refusal fallback.
-- Its implicit prompt cache only engages above a larger minimum prefix, so the five-attempt studies show no cache reads.
+- Its implicit prompt cache only engages above a larger minimum prefix, so the five-attempt studies show no cache reads. Claude Sonnet 5.5 does cache the same prefix (about 1.5k tokens) from the second map call on.
 
 Usage is normalised to the Anthropic meaning: input excludes cache reads, and output includes thinking tokens.
 
-**Cheaper models.** Any step can move to `claude-sonnet-5-5` or `claude-haiku-5-5` through its env var. Map and Q2 are the usual candidates. Measure first: the Admin card shows the last 7 days of token usage.
+**Other Claude models.** Sonnet 5.5 is the Claude default for every step. Any step can move to `claude-opus-5-5` (for example `UX_DIRECTOR_MODEL_SCORE`, for a stronger judge) or `claude-haiku-5-5` (map and Q2 are the usual candidates) through its env var, with no code change. Measure first: the Admin card shows the last 7 days of token usage, and `scripts/eval/ux-director/` compares setups on planted-issue studies.
 
 ## 2. How an analysis runs
 
@@ -96,8 +96,8 @@ The scorer judges each item in isolation. It never sees the other findings or th
 
 - At most 25 attempts per analysis and 100 events per attempt. Studies with more than 25 finished attempts always show as out of date by the excess.
 - Map and score calls run 3 at a time. The SDK retries 429, 5xx and connection errors twice with backoff, and a step is attempted at most 3 times.
-- Per-step `max_tokens`: Q2 4k, map 8k, reduce 32k, each judgment 4k. Effort: Q2 `low`, map `medium`, reduce `high`, score `medium`. Thinking is adaptive and always on with Opus 5.5.
-- Server-side refusal fallbacks (`fallbacks: "default"`) are on, except for Haiku, which has none and rejects the parameter. A refusal that survives them, or any refusal on Haiku, fails the step with its category.
+- Per-step `max_tokens`: Q2 4k, map 8k, reduce 32k, each judgment 4k. Effort: Q2 `low`, map `medium`, reduce `high`, score `medium`. The request sets effort only; thinking follows each model's default. Sonnet 5.5 accepts all three effort levels.
+- Server-side refusal fallbacks (`fallbacks: "default"`) are on for Sonnet and Opus. Sonnet 5.5 accepts the parameter (verified live 2026-11-04); no refusal has occurred in our runs, so the fallback path itself hasn't been exercised. Haiku has none and rejects the parameter. A refusal that survives them, or any refusal on Haiku, fails the step with its category.
 - One running analysis per study. Repeating the request returns the same processing report.
 - Token usage is stored per step, summed on the run (`agent_runs.details.usage`) and totalled on the Admin card.
 
@@ -159,3 +159,27 @@ Reference run (Gemini `gemini-3.8-flash`, 5 attempts, 2026-11-03):
 - Reduce dominates, at up to 15k output tokens; its cap was raised from 16k to 32k as a result.
 - Verify sent reduce back once, and the correction passed.
 - 2 findings were kept (79–92), and none were dropped.
+
+Reference run (Claude `claude-sonnet-5-5` for every step, the default, 5 attempts, 2026-11-04):
+- Q2 took 1.6–5.2 s (5 calls), inside the 8 s wait; Admin verification took 2.1 s.
+- The analysis took 68 s with no corrective reduce: about 16k input, 8.6k output, 5.8k cache-read and 8.3k cache-write tokens, about $0.14 per report.
+- Map calls 2–5 each read 1,462 cached tokens (system prompt plus study prefix), so the real prefix is above Sonnet's cache minimum.
+- Reduce took 29 s and scoring 20 s (3 judgments at a time).
+- 2 findings were kept (80 and 73) with recommendations at 90; none were dropped. The re-run after a sixth attempt also kept 2.
+
+Q2 wait on Sonnet (2026-11-04): 12 Sonnet Q2-shaped calls (5 live Q2s, Admin verification, 6 probes) took p50 ≈ 1.9 s, p90 ≈ 3.6 s, max 5.2 s, all inside the 8 s `UX_DIRECTOR_Q2_TIMEOUT_MS`. The wait stays at 8 s and Q2 stays on Sonnet. The eval runner now records Q2 latency per attempt (`q2LatencyMs` in `results.jsonl`) for later re-checks.
+
+MVP configuration (2026-11-05): all-Sonnet (`claude-sonnet-5-5` for every step, the code default), measured on `scripts/eval/ux-director` over 16 planted-issue studies × 2 reps:
+
+| Metric | Result |
+|---|---|
+| Runs ready | 32/32 |
+| Strict recall | 92% |
+| Recommendation fit | 97% |
+| False findings | 4 |
+| Must-not violations | 1 |
+| Cost | about $0.12 per report |
+
+Known issue: on a clean study, or with a harmless decoy detour, the reduce step can still write a finding and the scorer keeps it (scores don't separate real from false findings; AUROC 0.52). Setting `UX_DIRECTOR_MODEL_SCORE=claude-opus-5-5` drops the clean-study false findings for about $0.03 more per report. The prompt and rubric fix is tracked separately.
+
+Haiku comparison (2026-11-05, same eval): all-Haiku costs about $0.008 per report and ran 32/32. Strict recall was 86% against Sonnet's 92%, which is no detectable difference on 36 paired issue-runs (McNemar p = 0.5). Reports are noisier: 1.7 kept findings per report against 1.3, 11 single-attempt splits of one issue against 2, and 2 must-not violations against 1. Sonnet stays the default. `UX_DIRECTOR_MODEL_MAP=claude-haiku-5-5` and `UX_DIRECTOR_MODEL_Q2=claude-haiku-5-5` remain the cheap-mode option to benchmark next.
